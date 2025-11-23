@@ -1,50 +1,64 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: 0.0.0 -> 1.0.0
+- Modified principles: (new) I. Momentary Control, II. Explicit MQTT Contracts, III. Python-Only Surface, IV. Safe Alert Patterns, V. Observable Operations
+- Added sections: Architecture Constraints, Workflow & Quality Gates
+- Removed sections: none
+- Templates requiring updates:
+	- ✅ .specify/templates/plan-template.md (constitution check references remain valid)
+	- ✅ .specify/templates/spec-template.md (no node-specific guidance present)
+	- ✅ .specify/templates/tasks-template.md (task grouping already matches principle V requirements)
+- Follow-up TODOs: none
+-->
+
+# Lightspeed Alerts Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Momentary Control (Non-Negotiable)
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+The middleware may take over Logitech lighting only to render an alert and MUST always save, restore, or release control on `auto` requests or process exit. Any feature proposal must state how it preserves the user's prior lighting profile and prove that the takeover duration is finite.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Explicit MQTT Contracts
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+All capabilities are triggered via MQTT topics (`color`, `alert`, `warning`, `auto`). Payload formats are limited to `#RRGGBB`, `R,G,B`, or `{ "r":int, "g":int, "b":int }`. Specifications, plans, and code reviews must reject changes that introduce additional schemas or undocumented topics.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Python-Only Surface
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+The runtime stack is Python 3.13+, `logipy`, `paho-mqtt`, and the Logitech LED SDK DLL. Reintroducing Node.js, extra daemons, or dependency bloat requires a separately approved experiment and a reversible migration plan.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. Safe Alert Patterns
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Alert effects must use bounded intervals (≤500 ms per frame), deterministic palettes (red/white/black for alerts, amber/black for warnings), and provide a defined stop condition. No new effect can bypass the stop flag or block the main MQTT loop.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Observable Operations
+
+Every message handling path logs topic, parsed intent, and outcome (success, validation failure, SDK error). Health indicators (e.g., retained status topic or CLI output) must expose whether lighting control is currently held or released.
+
+## Architecture Constraints
+
+- **Hardware & SDK**: LogitechLed.dll must reside next to `simple-logi.py` or be referenced via `LOGI_LED_DLL`. The service saves lighting state once per session and never assumes exclusive device ownership.
+- **Runtime Layout**: Single Python entrypoint supporting `serve`, `color`, `alert`, `warning`, `auto` sub-commands. MQTT handling runs in one thread, while visual patterns run on background workers guarded by stop events.
+- **Configuration**: `.env` defines broker host/port, credentials, topics, and `DEFAULT_COLOR`. Missing required values stops startup with a descriptive error.
+- **Performance Envelope**: The service must process MQTT messages within 100 ms of receipt and keep CPU usage negligible by sleeping between pattern frames.
+
+## Workflow & Quality Gates
+
+- **Spec Kit Order**: Always run `/speckit.constitution` → `/speckit.specify` → `/speckit.plan` → `/speckit.tasks` → `/speckit.implement`. Skip steps only when documented as out-of-scope experiments.
+- **Constitution Check Items** (must appear in every plan):
+  1. Does the change preserve Principle I (save/restore path)?
+  2. Are MQTT payloads unchanged or clearly versioned per Principle II?
+  3. Does the solution rely solely on Python dependencies per Principle III?
+  4. Are alert intervals and palettes within Principle IV bounds?
+  5. Where are logs/emitted metrics recorded to satisfy Principle V?
+- **Testing Expectations**: Each user story describes the MQTT scenarios it covers and provides a repeatable manual validation note (e.g., publish payload X → observe pattern Y → send `auto`). Automated tests (unit or smoke scripts) must stub MQTT bindings when hardware access is unavailable.
+- **Release Protocol**: Before tagging a release, run the CLI `auto` command to ensure lighting is restored, then document the tested MQTT topics in the release notes.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+- This constitution supersedes any ad-hoc practices. Reviews must cite the principle or gate being satisfied (or justify variance in the plan's Complexity Tracking table).
+- **Versioning**: MAJOR for adding/removing principles or altering governance, MINOR for new sections or expanded guidance, PATCH for clarifications that do not change intent.
+- **Amendments**: Proposed via `/speckit.constitution` with reasoning, impact assessment, and template sync notes. Approval requires consensus between stakeholders responsible for MQTT infrastructure and hardware usage.
+- **Compliance**: `/speckit.plan` and `/speckit.tasks` outputs must explicitly document how each user story honors these principles before `/speckit.implement` begins.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-11-23 | **Last Amended**: 2025-11-23
