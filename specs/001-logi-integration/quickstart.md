@@ -5,17 +5,114 @@
 - Windows 10/11 workstation with Logitech G HUB (or LGS) and `LogitechLed.dll` placed next to `simple-logi.py`.
 - Python 3.13 with virtual environment activated (`.venv\\Scripts\\activate`).
 - MQTT broker credentials (host, port, optional username/password) and Home Assistant configured to listen on the same broker.
-- Dependencies installed via `pip install -r requirements.txt` (implementation will add `pyyaml`).
+- Dépendances Python installées via `pip install -r requirements.txt` (`logipy`, `paho-mqtt`, `pyyaml`).
 
 ## 2. Configure `config.yaml`
 
-1. Copy `config.example.yaml` (to be added) to `config.yaml`.
-2. Fill in:
-    - `mqtt.host`, `mqtt.port`, `mqtt.username`, `mqtt.password` (if needed).
-    - `topics.base` (e.g., `lightspeed/alerts`).
-    - `home_assistant` block (`device_id`, `device_name`, manufacturer info).
-    - Optional overrides: palette RGB lists, frame durations, `logitech.dll_path`.
-3. Save the file in the project root (same folder as `simple-logi.py`).
+1. Copy the template: `Copy-Item config.example.yaml config.yaml`.
+2. Update MQTT credentials, Home Assistant metadata, and optional palette/logitech overrides. You can keep `${MQTT_PASSWORD}` to pull the secret from the environment.
+3. Validate the file without starting MQTT/Logitech:
+
+     ```pwsh
+     python simple-logi.py validate-config --config config.yaml
+     ```
+
+4. Commit to a path strategy: either pass `--config` everywhere or set `LOGI_CONFIG_PATH` so every command picks the same file (flag overrides the env var).
+
+### Example & Reference
+
+<!-- config-example:start -->
+```yaml
+# Exemple de configuration Logitech Alerts
+# Copiez ce fichier vers config.yaml puis remplacez les valeurs ci-dessous.
+# Toutes les clés doivent rester présentes pour que la validation réussisse.
+
+mqtt:
+  host: localhost # Hôte / IP du broker
+  port: 1883 # Port TCP (1883 sans TLS)
+  username: "" # Identifiant optionnel
+  password: "${MQTT_PASSWORD}" # Secret optionnel (peut référencer une variable d'environnement)
+  client_id: lightspeed-led # Nom du client MQTT
+  keepalive: 60 # Intervalle keepalive en secondes
+
+topics:
+  base: lightspeed/alerts # Préfixe commun pour toutes les entités HA
+  color: "" # Laisser vide pour dériver <base>/color, sinon fournir un topic complet
+  alert: ""
+  warning: ""
+  auto: ""
+  status: "" # Topic de disponibilité / santé
+
+home_assistant:
+  device_id: lightspeed-alerts
+  device_name: "Logitech Alerts"
+  manufacturer: "Logitech"
+  model: "LED Middleware"
+  area: "" # Nom d'aire HA optionnel
+
+lighting:
+  default_color: "#00FF80"
+  auto_restore: true # Restaure le profil Logitech lors d'un `auto`
+  lock_file: "lightspeed.lock" # Verrou pour éviter les accès concurrents
+
+palettes:
+  alert:
+    max_duration_ms: 500 # Ne jamais dépasser 500 ms (Principe IV)
+    frames:
+    - color: "#FF0000"
+      duration_ms: 150
+    - color: "#FFFFFF"
+      duration_ms: 150
+    - color: "#000000"
+      duration_ms: 150
+  warning:
+    max_duration_ms: 350
+    frames:
+    - color: "#FF8C00"
+      duration_ms: 150
+    - color: "#000000"
+      duration_ms: 150
+
+logitech:
+  dll_path: "" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
+  profile_backup: "backup.json" # Fichier où stocker l'état initial
+
+observability:
+  health_topic: "lightspeed/alerts/health"
+  log_level: "INFO"
+```
+<!-- config-example:end -->
+
+<!-- config-table:start -->
+| Clé YAML | Description | Exemple |
+|-----------|-------------|---------|
+| `mqtt.host` | Adresse/IP du broker MQTT | `localhost` |
+| `mqtt.port` | Port TCP utilisé par le broker | `1883` |
+| `mqtt.username` | Identifiant optionnel | `admin` |
+| `mqtt.password` | Secret ou référence ${ENV} | `${MQTT_PASSWORD}` |
+| `mqtt.client_id` | Nom unique du client MQTT | `lightspeed-led` |
+| `mqtt.keepalive` | Intervalle keepalive en secondes | `60` |
+| `topics.base` | Préfixe commun pour tous les topics | `lightspeed/alerts` |
+| `topics.color` | Topic pour les commandes de couleur | `<base>/color` |
+| `topics.alert` | Topic pour déclencher le pattern alerte | `<base>/alert` |
+| `topics.warning` | Topic pour déclencher le pattern warning | `<base>/warning` |
+| `topics.auto` | Topic pour rendre la main à Logitech | `<base>/auto` |
+| `topics.status` | Topic retained online/offline | `<base>/status` |
+| `home_assistant.device_id` | Identifiant unique Home Assistant | `lightspeed-alerts` |
+| `home_assistant.device_name` | Nom présenté dans HA | `Logitech Alerts` |
+| `home_assistant.manufacturer` | Fabricant affiché | `Logitech` |
+| `home_assistant.model` | Modèle affiché | `LED Middleware` |
+| `home_assistant.area` | Zone HA optionnelle | `Bureau` |
+| `lighting.default_color` | Couleur appliquée au démarrage | `#00FF80` |
+| `lighting.auto_restore` | Restaure le profil Logitech en mode auto | `true` |
+| `lighting.lock_file` | Verrou pour éviter les accès concurrents | `lightspeed.lock` |
+| `palettes.alert.max_duration_ms` | Durée max (Principe IV) | `500` |
+| `palettes.warning.max_duration_ms` | Durée max warning | `350` |
+| `logitech.dll_path` | Chemin personnalisé vers LogitechLed.dll |  |
+| `logitech.profile_backup` | Sauvegarde du profil initial | `backup.json` |
+| `observability.health_topic` | Topic JSON de santé retenu | `<base>/health` |
+| `observability.log_level` | Niveau de logs | `INFO` |
+<!-- config-table:end -->
 
 ## 3. Run the MQTT Service
 

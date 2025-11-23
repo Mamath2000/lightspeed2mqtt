@@ -1,13 +1,13 @@
 <!--
 Sync Impact Report
-- Version change: 0.0.0 -> 1.0.0
-- Modified principles: (new) I. Momentary Control, II. Explicit MQTT Contracts, III. Python-Only Surface, IV. Safe Alert Patterns, V. Observable Operations
-- Added sections: Architecture Constraints, Workflow & Quality Gates
+- Version change: 1.0.0 -> 1.1.0
+- Modified principles: Architecture Constraints – Configuration bullet now mandates `config.yaml` instead of `.env`
+- Added sections: none
 - Removed sections: none
 - Templates requiring updates:
-	- ✅ .specify/templates/plan-template.md (constitution check references remain valid)
-	- ✅ .specify/templates/spec-template.md (no node-specific guidance present)
-	- ✅ .specify/templates/tasks-template.md (task grouping already matches principle V requirements)
+  - ✅ .specify/templates/plan-template.md (no `.env` references; no change required)
+  - ✅ .specify/templates/spec-template.md (already neutral on configuration medium)
+  - ✅ .specify/templates/tasks-template.md (no action; tasks continue to reference config loader work)
 - Follow-up TODOs: none
 -->
 
@@ -39,7 +39,7 @@ Every message handling path logs topic, parsed intent, and outcome (success, val
 
 - **Hardware & SDK**: LogitechLed.dll must reside next to `simple-logi.py` or be referenced via `LOGI_LED_DLL`. The service saves lighting state once per session and never assumes exclusive device ownership.
 - **Runtime Layout**: Single Python entrypoint supporting `serve`, `color`, `alert`, `warning`, `auto` sub-commands. MQTT handling runs in one thread, while visual patterns run on background workers guarded by stop events.
-- **Configuration**: `.env` defines broker host/port, credentials, topics, and `DEFAULT_COLOR`. Missing required values stops startup with a descriptive error.
+- **Configuration**: `config.yaml` (or a CLI-provided YAML path) defines MQTT broker settings, discovery metadata, topic prefixes, palettes, and Logitech DLL overrides. A tracked `config.example.yaml` serves as the canonical template, and startup HALTs if required keys are missing or malformed.
 - **Performance Envelope**: The service must process MQTT messages within 100 ms of receipt and keep CPU usage negligible by sleeping between pattern frames.
 
 ## Workflow & Quality Gates
@@ -61,4 +61,4 @@ Every message handling path logs topic, parsed intent, and outcome (success, val
 - **Amendments**: Proposed via `/speckit.constitution` with reasoning, impact assessment, and template sync notes. Approval requires consensus between stakeholders responsible for MQTT infrastructure and hardware usage.
 - **Compliance**: `/speckit.plan` and `/speckit.tasks` outputs must explicitly document how each user story honors these principles before `/speckit.implement` begins.
 
-**Version**: 1.0.0 | **Ratified**: 2025-11-23 | **Last Amended**: 2025-11-23
+//**Version**: 1.1.0 | **Ratified**: 2025-11-23 | **Last Amended**: 2025-11-23
