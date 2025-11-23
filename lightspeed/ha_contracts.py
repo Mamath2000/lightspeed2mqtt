@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import Iterable
 
 from lightspeed.config import ConfigProfile
 
@@ -31,56 +31,61 @@ def _device_descriptor(profile: ConfigProfile) -> dict:
 def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage]:
     device = _device_descriptor(profile)
     availability = [{"topic": profile.topics.status}]
-    messages: List[DiscoveryMessage] = []
-
-    light_payload = {
-        "name": f"{device['name']} Couleur",
-        "unique_id": f"{profile.home_assistant.device_id}_color",
-        "command_topic": profile.topics.color,
-        "command_template": '{"r": {{ red }}, "g": {{ green }}, "b": {{ blue }}}',
-        "supported_color_modes": ["rgb"],
-        "optimistic": True,
-        "availability": availability,
-        "device": device,
-    }
-    messages.append(_build_message("light", light_payload))
-
-    for kind, topic in (("alert", profile.topics.alert), ("warning", profile.topics.warning)):
-        payload = {
-            "name": f"{device['name']} {kind}",
-            "unique_id": f"{profile.home_assistant.device_id}_{kind}",
-            "command_topic": topic,
+    components = {
+        "color_light": {
+            "platform": "light",
+            "unique_id": f"{profile.home_assistant.device_id}_color",
+            "object_id": f"{profile.home_assistant.device_id}_color",
+            "name": f"{device['name']} Couleur",
+            "schema": "json",
+            "command_topic": profile.topics.color,
+            "supported_color_modes": ["rgb"],
+            "optimistic": True,
+            "availability": availability,
+        },
+        "alert_button": {
+            "platform": "button",
+            "unique_id": f"{profile.home_assistant.device_id}_alert",
+            "object_id": f"{profile.home_assistant.device_id}_alert",
+            "name": f"{device['name']} Alert",
+            "command_topic": profile.topics.alert,
             "payload_press": "ON",
             "availability": availability,
-            "device": device,
-        }
-        messages.append(_build_message("button", payload))
-
-    auto_payload = {
-        "name": f"{device['name']} Auto",
-        "unique_id": f"{profile.home_assistant.device_id}_auto",
-        "command_topic": profile.topics.auto,
-        "payload_press": "ON",
-        "availability": availability,
-        "device": device,
+        },
+        "warning_button": {
+            "platform": "button",
+            "unique_id": f"{profile.home_assistant.device_id}_warning",
+            "object_id": f"{profile.home_assistant.device_id}_warning",
+            "name": f"{device['name']} Warning",
+            "command_topic": profile.topics.warning,
+            "payload_press": "ON",
+            "availability": availability,
+        },
+        "auto_button": {
+            "platform": "button",
+            "unique_id": f"{profile.home_assistant.device_id}_auto",
+            "object_id": f"{profile.home_assistant.device_id}_auto",
+            "name": f"{device['name']} Auto",
+            "command_topic": profile.topics.auto,
+            "payload_press": "ON",
+            "availability": availability,
+        },
+        "status_binary_sensor": {
+            "platform": "binary_sensor",
+            "unique_id": f"{profile.home_assistant.device_id}_status",
+            "object_id": f"{profile.home_assistant.device_id}_status",
+            "name": f"{device['name']} Statut",
+            "state_topic": profile.topics.status,
+            "payload_on": "online",
+            "payload_off": "offline",
+            "availability": availability,
+        },
     }
-    messages.append(_build_message("button", auto_payload))
 
-    status_payload = {
-        "name": f"{device['name']} Statut",
-        "unique_id": f"{profile.home_assistant.device_id}_status",
-        "state_topic": profile.topics.status,
-        "payload_on": "online",
-        "payload_off": "offline",
-        "availability": availability,
+    payload = {
         "device": device,
+        "origin": {"name": device["name"]},
+        "components": components,
     }
-    messages.append(_build_message("binary_sensor", status_payload))
-
-    return messages
-
-
-def _build_message(component: str, payload: dict) -> DiscoveryMessage:
-    unique_id = payload["unique_id"]
-    topic = f"{DISCOVERY_PREFIX}/{component}/{unique_id}/config"
-    return DiscoveryMessage(topic=topic, payload=json.dumps(payload, separators=(",", ":")))
+    topic = f"{DISCOVERY_PREFIX}/device/{profile.home_assistant.device_id}/config"
+    return [DiscoveryMessage(topic=topic, payload=json.dumps(payload, separators=(",", ":")))]
