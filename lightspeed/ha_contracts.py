@@ -30,7 +30,13 @@ def _device_descriptor(profile: ConfigProfile) -> dict:
 
 def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage]:
     device = _device_descriptor(profile)
-    availability = [{"topic": profile.topics.status}]
+    availability = [
+        {
+            "topic": profile.topics.status,
+            "payload_on": "online",
+            "payload_off": "offline",
+            "value_template": "{{ value_json.state }}"
+            }]
     components = {
         "color_light": {
             "platform": "light",
@@ -41,7 +47,6 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
             "command_topic": profile.topics.color,
             "supported_color_modes": ["rgb"],
             "optimistic": True,
-            "availability": availability,
         },
         "alert_button": {
             "platform": "button",
@@ -50,7 +55,6 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
             "name": f"{device['name']} Alert",
             "command_topic": profile.topics.alert,
             "payload_press": "ON",
-            "availability": availability,
         },
         "warning_button": {
             "platform": "button",
@@ -59,16 +63,16 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
             "name": f"{device['name']} Warning",
             "command_topic": profile.topics.warning,
             "payload_press": "ON",
-            "availability": availability,
         },
-        "auto_button": {
-            "platform": "button",
-            "unique_id": f"{profile.home_assistant.device_id}_auto",
-            "object_id": f"{profile.home_assistant.device_id}_auto",
-            "name": f"{device['name']} Auto",
+        "pilot_switch": {
+            "platform": "switch",
+            "unique_id": f"{profile.home_assistant.device_id}_pilot",
+            "object_id": f"{profile.home_assistant.device_id}_pilot",
+            "name": f"{device['name']} Pilot",
             "command_topic": profile.topics.auto,
-            "payload_press": "ON",
-            "availability": availability,
+            "state_topic": profile.topics.auto_state,
+            "payload_on": "ON",
+            "payload_off": "OFF",
         },
         "status_binary_sensor": {
             "platform": "binary_sensor",
@@ -78,7 +82,8 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
             "state_topic": profile.topics.status,
             "payload_on": "online",
             "payload_off": "offline",
-            "availability": availability,
+            "value_template": "{{ value_json.state }}",
+            "json_attributes_topic": profile.topics.status,
         },
     }
 
@@ -86,6 +91,7 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
         "device": device,
         "origin": {"name": device["name"]},
         "components": components,
+        "availability": availability,
     }
     topic = f"{DISCOVERY_PREFIX}/device/{profile.home_assistant.device_id}/config"
     return [DiscoveryMessage(topic=topic, payload=json.dumps(payload, separators=(",", ":")))]

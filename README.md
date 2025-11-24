@@ -56,6 +56,7 @@ topics:
   alert: ""
   warning: ""
   auto: ""
+  auto_state: "" # Topic retained pour exposer l'état du switch (défaut = <auto>)
   status: "" # Topic de disponibilité / santé
 
 home_assistant:
@@ -69,6 +70,9 @@ lighting:
   default_color: "#00FF80"
   auto_restore: true # Restaure le profil Logitech lors d'un `auto`
   lock_file: "lightspeed.lock" # Verrou pour éviter les accès concurrents
+
+effects:
+  override_duration_seconds: 10 # Durée Alert/Warning en secondes (entre 1 et 300)
 
 palettes:
   alert:
@@ -114,6 +118,7 @@ observability:
 | `topics.alert` | Topic pour déclencher le pattern alerte | `<base>/alert` |
 | `topics.warning` | Topic pour déclencher le pattern warning | `<base>/warning` |
 | `topics.auto` | Topic pour rendre la main à Logitech | `<base>/auto` |
+| `topics.auto_state` | Topic retained exposant l'état du switch piloté | `<base>/auto/state` |
 | `topics.status` | Topic retained online/offline | `<base>/status` |
 | `home_assistant.device_id` | Identifiant unique Home Assistant | `lightspeed-alerts` |
 | `home_assistant.device_name` | Nom présenté dans HA | `Logitech Alerts` |
@@ -123,6 +128,7 @@ observability:
 | `lighting.default_color` | Couleur appliquée au démarrage | `#00FF80` |
 | `lighting.auto_restore` | Restaure le profil Logitech en mode auto | `true` |
 | `lighting.lock_file` | Verrou pour éviter les accès concurrents | `lightspeed.lock` |
+| `effects.override_duration_seconds` | Durée des overrides Alert/Warning (1-300s) | `10` |
 | `palettes.alert.max_duration_ms` | Durée max (Principe IV) | `500` |
 | `palettes.warning.max_duration_ms` | Durée max warning | `350` |
 | `logitech.dll_path` | Chemin personnalisé vers LogitechLed.dll |  |

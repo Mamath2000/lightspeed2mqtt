@@ -42,6 +42,7 @@ class TopicMap:
     alert: str
     warning: str
     auto: str
+    auto_state: str
     status: str
 
 
@@ -59,6 +60,11 @@ class LightingSettings:
     default_color: RGB
     auto_restore: bool
     lock_file: str
+
+
+@dataclass(frozen=True)
+class EffectsSettings:
+    override_duration_seconds: int
 
 
 @dataclass(frozen=True)
@@ -99,6 +105,7 @@ class ConfigProfile:
     topics: TopicMap
     home_assistant: HomeAssistantSettings
     lighting: LightingSettings
+    effects: EffectsSettings
     palettes: Palettes
     logitech: LogitechSettings
     observability: ObservabilitySettings
@@ -125,6 +132,7 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
     topics_data = substituted.get("topics", {})
     ha_data = substituted.get("home_assistant", {})
     lighting_data = substituted.get("lighting", {})
+    effects_data = substituted.get("effects", {})
     palettes_data = substituted.get("palettes", {})
     logitech_data = substituted.get("logitech", {})
     observability_data = substituted.get("observability", {})
@@ -139,12 +147,14 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
     )
 
     topic_base = _require_str(topics_data, "base", default=DEFAULT_TOPIC_BASE)
+    auto_topic = _derive_topic(topics_data.get("auto"), f"{topic_base}/auto")
     topics = TopicMap(
         base=topic_base,
         color=_derive_topic(topics_data.get("color"), f"{topic_base}/color"),
         alert=_derive_topic(topics_data.get("alert"), f"{topic_base}/alert"),
         warning=_derive_topic(topics_data.get("warning"), f"{topic_base}/warning"),
-        auto=_derive_topic(topics_data.get("auto"), f"{topic_base}/auto"),
+        auto=auto_topic,
+        auto_state=_derive_topic(topics_data.get("auto_state"), f"{auto_topic}/state"),
         status=_derive_topic(topics_data.get("status"), f"{topic_base}/status"),
     )
 
@@ -160,6 +170,10 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
         default_color=_parse_color(_require_str(lighting_data, "default_color", default="#00FF80")),
         auto_restore=bool(lighting_data.get("auto_restore", True)),
         lock_file=_require_str(lighting_data, "lock_file", default="lightspeed.lock"),
+    )
+
+    effects = EffectsSettings(
+        override_duration_seconds=int(effects_data.get("override_duration_seconds", 10)),
     )
 
     palettes = Palettes(
@@ -187,6 +201,7 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
         topics=topics,
         home_assistant=home_assistant,
         lighting=lighting,
+        effects=effects,
         palettes=palettes,
         logitech=logitech,
         observability=observability,
@@ -315,8 +330,15 @@ def _validate_profile(profile: ConfigProfile) -> None:
     if profile.mqtt.keepalive <= 0:
         raise ConfigError("Le keepalive MQTT doit être strictement positif")
 
-    for topic in (profile.topics.base, profile.topics.color, profile.topics.alert,
-                  profile.topics.warning, profile.topics.auto, profile.topics.status):
+    for topic in (
+        profile.topics.base,
+        profile.topics.color,
+        profile.topics.alert,
+        profile.topics.warning,
+        profile.topics.auto,
+        profile.topics.auto_state,
+        profile.topics.status,
+    ):
         if not topic or " " in topic:
             raise ConfigError("Les topics MQTT ne doivent pas être vides ni contenir d'espaces")
 
@@ -344,6 +366,10 @@ def _validate_profile(profile: ConfigProfile) -> None:
     if any(channel < 0 or channel > 255 for channel in profile.lighting.default_color):
         raise ConfigError("Les composantes RGB doivent être comprises entre 0 et 255")
 
+    duration = profile.effects.override_duration_seconds
+    if duration < 1 or duration > 300:
+        raise ConfigError("effects.override_duration_seconds doit être compris entre 1 et 300 secondes")
+
 
 def _field_names(cls, exclude: Optional[set[str]] = None) -> Tuple[str, ...]:
     excluded = exclude or set()
@@ -357,6 +383,7 @@ def _compute_schema_revision() -> str:
         "TopicMap": _field_names(TopicMap),
         "HomeAssistantSettings": _field_names(HomeAssistantSettings),
         "LightingSettings": _field_names(LightingSettings),
+        "EffectsSettings": _field_names(EffectsSettings),
         "PaletteDefinition": _field_names(PaletteDefinition),
         "PaletteFrame": _field_names(PaletteFrame),
         "LogitechSettings": _field_names(LogitechSettings),

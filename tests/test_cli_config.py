@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 import textwrap
 import types
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Mapping
 
 import pytest
+
+from lightspeed.config import load_config
 
 SIMPLE_LOGI_PATH = Path(__file__).resolve().parents[1] / "simple-logi.py"
 
@@ -173,8 +176,152 @@ def test_validate_command_failure(simple_logi_module, tmp_path, capsys):
     assert str(config_path) in captured.out
 
 
+def test_validate_command_failure_override_duration(simple_logi_module, tmp_path, capsys):
+    config_path = _write_config(
+        tmp_path,
+        """
+        mqtt:
+          host: localhost
+          client_id: alerts
+        topics:
+          base: foo/bar
+        home_assistant:
+          device_id: foo
+          device_name: Foo Device
+          manufacturer: TestCo
+          model: RevA
+        lighting:
+          default_color: "#112233"
+          lock_file: lock.bin
+        effects:
+          override_duration_seconds: 999
+        palettes: {}
+        logitech:
+          profile_backup: backup.json
+        observability:
+          log_level: INFO
+        """,
+    )
+
+    exit_code = simple_logi_module.run_validate_command(config_path)
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "override_duration_seconds" in captured.out
+
+
 def test_normalize_global_args_accepts_config_after_command(simple_logi_module):
     raw_args = ["validate-config", "--config", "foo.yaml"]
     normalized = simple_logi_module._normalize_global_args(raw_args)
     assert normalized[:2] == ["--config", "foo.yaml"]
     assert normalized[2:] == ["validate-config"]
+
+
+def _load_profile(tmp_path: Path):
+  config_path = _write_config(
+    tmp_path,
+    """
+    mqtt:
+      host: localhost
+      client_id: alerts
+    topics:
+      base: foo/bar
+    home_assistant:
+      device_id: foo
+      device_name: Foo Device
+      manufacturer: TestCo
+      model: RevA
+    lighting:
+      default_color: "#112233"
+      lock_file: lock.bin
+    palettes: {}
+    logitech:
+      profile_backup: backup.json
+    observability:
+      log_level: INFO
+    """,
+  )
+  return load_config(config_path)
+
+
+def test_read_pilot_switch_state_returns_bool(simple_logi_module, tmp_path, monkeypatch):
+  profile = _load_profile(tmp_path)
+
+  class _FakeBootstrapClient:
+    def __init__(self, *_, **__):
+      self.on_connect = None
+      self.on_message = None
+      self.subscriptions = []
+
+    def username_pw_set(self, *_args, **_kwargs):
+      return None
+
+    def connect(self, *_args, **_kwargs):
+      if self.on_connect:
+        self.on_connect(self, None, None, 0)
+
+    def loop_start(self):
+      return None
+
+    def loop_stop(self):
+      return None
+
+    def disconnect(self):
+      return None
+
+    def subscribe(self, topic: str, qos: int):
+      import types as _types
+
+      self.subscriptions.append((topic, qos))
+      if self.on_message:
+        self.on_message(
+          self,
+          None,
+          _types.SimpleNamespace(topic=topic, payload=b"OFF"),
+        )
+
+  monkeypatch.setattr(
+    simple_logi_module,
+    "bootstrap_mqtt",
+    types.SimpleNamespace(Client=_FakeBootstrapClient),
+  )
+  logger = logging.getLogger("test.bootstrap")
+
+  state = simple_logi_module._read_pilot_switch_state(profile, logger=logger)
+
+  assert state is False
+
+
+def test_read_pilot_switch_state_handles_errors(simple_logi_module, tmp_path, monkeypatch):
+  profile = _load_profile(tmp_path)
+
+  class _FailClient:
+    def __init__(self, *_, **__):
+      self.on_connect = None
+      self.on_message = None
+
+    def username_pw_set(self, *_args, **_kwargs):
+      return None
+
+    def connect(self, *_args, **_kwargs):
+      raise RuntimeError("boom")
+
+    def loop_start(self):
+      return None
+
+    def loop_stop(self):
+      return None
+
+    def disconnect(self):
+      return None
+
+  monkeypatch.setattr(
+    simple_logi_module,
+    "bootstrap_mqtt",
+    types.SimpleNamespace(Client=_FailClient),
+  )
+  logger = logging.getLogger("test.bootstrap.error")
+
+  state = simple_logi_module._read_pilot_switch_state(profile, logger=logger)
+
+  assert state is None

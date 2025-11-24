@@ -4,9 +4,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from lightspeed.config import ConfigProfile
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from lightspeed.control_mode import ControlMode
 
 _LOG_CONFIGURED = False
 
@@ -43,3 +46,48 @@ def build_health_payload(
     if last_error:
         data["last_error"] = last_error
     return json.dumps(data, separators=(",", ":"))
+
+
+def build_status_payload(
+    control: "ControlMode",
+    *,
+    state: str,
+    reason: Optional[str] = None,
+) -> str:
+    payload = {
+        "state": state,
+        "mode": control.state.value,
+        "pilot_switch": "ON" if control.pilot_switch else "OFF",
+        "light_state": "ON" if control.light_on else "OFF",
+        "updated_at": control.updated_at.astimezone(timezone.utc).isoformat(),
+        "last_color": control.last_command_color,
+        "last_brightness": control.last_brightness,
+    }
+    if control.override:
+        payload["override"] = control.override.to_payload()
+    if reason:
+        payload["reason"] = reason
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def override_reason(kind: str, action: str) -> str:
+    subject = (kind or "override").strip() or "override"
+    return f"{subject}_{action}"
+
+
+def override_log_context(
+    kind: str,
+    *,
+    action: str,
+    duration: Optional[int] = None,
+    invalid_value: Any | None = None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "override_kind": kind,
+        "override_action": action,
+    }
+    if duration is not None:
+        context["override_duration"] = duration
+    if invalid_value is not None:
+        context["override_invalid_value"] = invalid_value
+    return context

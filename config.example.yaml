@@ -11,7 +11,7 @@ mqtt:
   keepalive: 60 # Intervalle keepalive en secondes
 
 topics:
-  base: lightspeed/alerts # Préfixe commun pour toutes les entités HA
+  base: lightspeed # Préfixe commun pour toutes les entités HA
   color: "" # Laisser vide pour dériver <base>/color, sinon fournir un topic complet
   alert: ""
   warning: ""
@@ -57,5 +57,5 @@ logitech:
   profile_backup: "backup.json" # Fichier où stocker l'état initial
 
 observability:
-  health_topic: "lightspeed/alerts/health"
+  health_topic: "lightspeed/health"
   log_level: "INFO"

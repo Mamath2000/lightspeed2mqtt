@@ -5,17 +5,26 @@ import argparse
 import logging
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
-from typing import Mapping, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 from lightspeed.config import ConfigError, ConfigProfile, load_config
 from lightspeed.observability import configure_logging
 
 try:
     from lightspeed.mqtt import MqttLightingService
+except ImportError as exc:  # pragma: no cover - dependency guard
+    if "paho" in str(exc).lower():
+        print("Le module 'paho-mqtt' est requis. Installez-le avec: pip install -r requirements.txt")
+        sys.exit(1)
+    raise
+
+try:
+    import paho.mqtt.client as bootstrap_mqtt
 except ImportError as exc:  # pragma: no cover - dependency guard
     if "paho" in str(exc).lower():
         print("Le module 'paho-mqtt' est requis. Installez-le avec: pip install -r requirements.txt")
@@ -111,6 +120,55 @@ def run_cli_auto(profile: ConfigProfile) -> None:
         controller.shutdown()
 
 
+def _read_pilot_switch_state(
+    profile: ConfigProfile,
+    *,
+    logger: logging.Logger,
+    timeout: float = 2.0,
+) -> Optional[bool]:
+    """Return retained pilot switch state if broker exposes it, else None."""
+
+    event = threading.Event()
+    state: dict[str, Optional[str]] = {"value": None}
+
+    client = bootstrap_mqtt.Client(
+        client_id=f"{profile.mqtt.client_id}-bootstrap",
+        clean_session=True,
+    )
+    if profile.mqtt.username:
+        client.username_pw_set(profile.mqtt.username, profile.mqtt.password or None)
+
+    def _on_connect(mqtt_client, _userdata, _flags, rc):
+        if rc != 0:
+            logger.warning("Connexion bootstrap pilot échouée", extra={"code": rc})
+            event.set()
+            return
+        mqtt_client.subscribe(profile.topics.auto_state, qos=1)
+
+    def _on_message(_mqtt_client, _userdata, message):
+        state["value"] = message.payload.decode("utf-8", errors="ignore").strip().upper()
+        event.set()
+
+    client.on_connect = _on_connect
+    client.on_message = _on_message
+
+    try:
+        client.connect(profile.mqtt.host, profile.mqtt.port, keepalive=profile.mqtt.keepalive)
+        client.loop_start()
+        event.wait(timeout)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Lecture pilot switch impossible", extra={"error": str(exc)})
+        return None
+    finally:
+        client.loop_stop()
+        client.disconnect()
+
+    value = state["value"]
+    if value in {"ON", "OFF"}:
+        return value == "ON"
+    return None
+
+
 def run_validate_command(config_path: Path) -> int:
     try:
         profile = load_config(config_path)
@@ -177,6 +235,15 @@ def main() -> None:
             profile,
             validated_at=validated_at,
         )
+        bootstrap_state = _read_pilot_switch_state(profile, logger=logger)
+        if bootstrap_state is not None:
+            service.bootstrap_pilot_switch(bootstrap_state)
+            logger.info(
+                "État pilot initialisé",
+                extra={"pilot_switch": "ON" if bootstrap_state else "OFF"},
+            )
+        else:
+            logger.info("Aucun état pilot retenu détecté", extra={"topic": profile.topics.auto_state})
         try:
             service.start()
             service.loop_forever()

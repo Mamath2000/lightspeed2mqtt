@@ -30,6 +30,14 @@ def to_pct(value: int) -> int:
     return int(round((clamp_channel(value) / 255) * 100))
 
 
+def apply_brightness(color: RGB, brightness: int) -> RGB:
+    value = max(0, min(255, int(brightness)))
+    if value >= 255:
+        return color
+    ratio = value / 255 if value else 0
+    return tuple(int(channel * ratio) for channel in color)
+
+
 def parse_color_string(value: str) -> RGB:
     if not value:
         raise ValueError("Couleur vide")
@@ -138,6 +146,16 @@ class LightingController:
         with self.lock:
             logi_led.logi_led_restore_lighting()
         self.released = True
+
+
+def restore_logitech_control(controller: LightingController) -> None:
+    """Return keyboard control to Logitech Options+/G HUB via the controller."""
+    controller.release()
+
+
+def reapply_cached_color(controller: LightingController, base_color: RGB, brightness: int) -> None:
+    """Reapply the cached automation color/brightness after regaining pilot control."""
+    controller.set_static_color(apply_brightness(base_color, brightness))
 
 
 def ensure_logi_dll_loaded(override_path: Optional[Path] = None) -> bool:

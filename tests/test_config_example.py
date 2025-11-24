@@ -13,4 +13,6 @@ def test_config_example_loads_successfully():
     assert profile.mqtt.host == "localhost"
     assert profile.mqtt.password == "example"
     assert profile.topics.color == f"{profile.topics.base}/color"
+    assert profile.topics.auto_state == f"{profile.topics.auto}/state"
+    assert profile.effects.override_duration_seconds == 10
     assert profile.observability.health_topic == "lightspeed/alerts/health"

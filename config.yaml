@@ -16,10 +16,11 @@ topics:
   alert: "alert"
   warning: "warning"
   auto: "auto"
-  status: "lwt" # Topic de disponibilité / santé
+  auto_state: "" # Topic retained pour exposer l'état du switch (défaut = <auto>)
+  status: "lightspeed/health" # Topic de disponibilité / santé
 
 home_assistant:
-  device_id: lightspeed-alerts
+  device_id: lightspeed
   device_name: "Logitech Alerts"
   manufacturer: "Logitech"
   model: "LED Middleware"
@@ -29,6 +30,9 @@ lighting:
   default_color: "#00FF80"
   auto_restore: true # Restaure le profil Logitech lors d'un `auto`
   lock_file: "lightspeed.lock" # Verrou pour éviter les accès concurrents
+
+effects:
+  override_duration_seconds: 10 # Durée Alert/Warning en secondes (entre 1 et 300)
 
 palettes:
   alert:

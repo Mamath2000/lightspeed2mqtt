@@ -61,7 +61,9 @@ def test_load_config_happy_path(tmp_path):
     assert config.mqtt.port == 1884
     assert config.mqtt.keepalive == 45
     assert config.topics.color == "foo/bar/color"
+    assert config.topics.auto_state == "foo/bar/auto/state"
     assert config.lighting.default_color == (51, 102, 153)
+    assert config.effects.override_duration_seconds == 10
     assert config.palettes.alert.max_duration_ms == 450
     assert len(config.palettes.alert.frames) == 2
 
@@ -83,6 +85,37 @@ def test_missing_required_key_raises(tmp_path):
         lighting:
           default_color: "#112233"
           lock_file: lock
+        palettes: {}
+        logitech:
+          profile_backup: backup.json
+        observability:
+          log_level: INFO
+        """,
+    )
+
+    with pytest.raises(ConfigError):
+        load_config(config_path)
+
+
+def test_override_duration_out_of_range_raises(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+        mqtt:
+          host: localhost
+          client_id: alerts
+        topics:
+          base: foo/bar
+        home_assistant:
+          device_id: foo
+          device_name: Foo
+          manufacturer: Test
+          model: RevA
+        lighting:
+          default_color: "#112233"
+          lock_file: lock
+        effects:
+          override_duration_seconds: 0
         palettes: {}
         logitech:
           profile_backup: backup.json

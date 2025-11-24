@@ -59,4 +59,14 @@ def test_iter_discovery_messages_publishes_single_device_payload(tmp_path):
     color = components["color_light"]
     assert color["platform"] == "light"
     assert color["command_topic"] == profile.topics.color
-    assert components["status_binary_sensor"]["state_topic"] == profile.topics.status
+    pilot = components["pilot_switch"]
+    assert pilot["platform"] == "switch"
+    assert pilot["command_topic"] == profile.topics.auto
+    assert pilot["state_topic"] == profile.topics.auto_state
+    assert pilot["payload_on"] == "ON"
+    assert pilot["payload_off"] == "OFF"
+    assert "auto_button" not in components
+    status_sensor = components["status_binary_sensor"]
+    assert status_sensor["state_topic"] == profile.topics.status
+    assert status_sensor["value_template"] == "{{ value_json.state }}"
+    assert status_sensor["json_attributes_topic"] == profile.topics.status
