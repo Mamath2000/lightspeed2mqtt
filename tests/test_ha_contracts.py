@@ -51,48 +51,25 @@ def test_iter_discovery_messages_publishes_single_device_payload(tmp_path):
 
     assert len(messages) == 1
     message = messages[0]
-    assert message.topic == f"homeassistant/device/{profile.home_assistant.device_id}/config"
+    assert message.topic == f"homeassistant/light/{profile.home_assistant.device_id}/config"
 
     payload = json.loads(message.payload)
+    assert payload["name"] == "Lightspeed"
+    assert payload["optimistic"] is False
+    assert payload["state_topic"] == "foo/bar/status"
+    assert payload["state_value_template"] == "{{ value_json.state }}"
+    assert payload["command_topic"] == "foo/bar/switch"
+    assert payload["payload_on"] == "on"
+    assert payload["payload_off"] == "off"
+    assert payload["rgb_command_topic"] == "foo/bar/rgb/set"
+    assert payload["rgb_value_template"] == "{{ value_json.rgb | join(',') }}"
+    assert payload["brightness_command_topic"] == "foo/bar/brightness/set"
+    assert payload["brightness_value_template"] == "{{ value_json.brightness }}"
+    assert payload["effect"] is True
+    assert payload["effect_command_topic"] == "foo/bar/effect/set"
+    assert payload["effect_list"] == ["None", "Alert", "Warn", "Info"]
+    assert payload["effect_state_topic"] == "foo/bar/status"
+    assert payload["effect_value_template"] == "{{ value_json.effect }}"
+    assert payload["unique_id"] == "foo"
+    assert payload["object_id"] == "foo"
     assert payload["device"]["name"] == "Foo Device"
-    assert payload["availability"][0]["topic"] == profile.topics.lwt
-    components = payload["components"]
-    color = components["color_light"]
-    assert color["platform"] == "light"
-    assert color["command_topic"] == profile.topics.color
-    assert color["state_topic"] == profile.topics.color_state
-    assert color["brightness_command_topic"] == profile.topics.brightness
-    assert color["brightness_state_topic"] == profile.topics.brightness_state
-    power = components["power_switch"]
-    assert power["command_topic"] == profile.topics.power
-    assert power["state_topic"] == profile.topics.power_state
-    assert power["payload_on"] == "ON"
-    assert power["payload_off"] == "OFF"
-    mode = components["mode_switch"]
-    assert mode["command_topic"] == profile.topics.mode
-    assert mode["state_topic"] == profile.topics.mode_state
-    assert mode["payload_on"] == "pilot"
-    assert mode["payload_off"] == "logi"
-    alert_button = components["alert_button"]
-    assert alert_button["command_topic"] == profile.topics.alert
-    assert json.loads(alert_button["payload_press"]) == {"type": "alert"}
-    warning_button = components["warning_button"]
-    assert warning_button["command_topic"] == profile.topics.alert
-    assert json.loads(warning_button["payload_press"]) == {"type": "warning"}
-    status_sensor = components["status_binary_sensor"]
-    assert status_sensor["state_topic"] == profile.topics.status
-    assert status_sensor["value_template"] == "{{ value_json.state }}"
-    assert status_sensor["json_attributes_topic"] == profile.topics.status
-    availability_sensor = components["availability_sensor"]
-    assert availability_sensor["state_topic"] == profile.topics.lwt
-    assert availability_sensor["payload_on"] == "online"
-    assert availability_sensor["payload_off"] == "offline"
-    mode_sensor = components["mode_sensor"]
-    assert mode_sensor["state_topic"] == profile.topics.mode_state
-    info_button = components["info_button"]
-    assert info_button["command_topic"] == profile.topics.alert
-    assert json.loads(info_button["payload_press"]) == {"type": "info"}
-    availability = payload["availability"][0]
-    assert availability["topic"] == profile.topics.lwt
-    assert availability["payload_on"] == "online"
-    assert availability["payload_off"] == "offline"

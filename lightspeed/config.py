@@ -38,16 +38,12 @@ class MqttSettings:
 @dataclass(frozen=True)
 class TopicMap:
     base: str
-    power: str
-    power_state: str
-    mode: str
-    mode_state: str
-    color: str
-    color_state: str
-    brightness: str
-    brightness_state: str
-    alert: str
-    status: str
+    state_topic: str
+    command_topic: str
+    rgb_command_topic: str
+    brightness_command_topic: str
+    effect_command_topic: str
+    effect_state_topic: str
     lwt: str
 
 
@@ -152,55 +148,16 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
     )
 
     topic_base = _normalize_base(_require_str(topics_data, "base", default=DEFAULT_TOPIC_BASE))
-    power_suffix, power_topic = _derive_topic_pair(topics_data, "power", "power", topic_base)
-    power_state_suffix, power_state_topic = _derive_topic_pair(
-        topics_data,
-        "power_state",
-        f"{power_suffix}/state",
-        topic_base,
-    )
-    mode_suffix, mode_topic = _derive_topic_pair(topics_data, "mode", "mode", topic_base)
-    mode_state_suffix, mode_state_topic = _derive_topic_pair(
-        topics_data,
-        "mode_state",
-        f"{mode_suffix}/state",
-        topic_base,
-    )
-    color_suffix, color_topic = _derive_topic_pair(topics_data, "color", "color", topic_base)
-    color_state_suffix, color_state_topic = _derive_topic_pair(
-        topics_data,
-        "color_state",
-        f"{color_suffix}/state",
-        topic_base,
-    )
-    brightness_suffix, brightness_topic = _derive_topic_pair(
-        topics_data,
-        "brightness",
-        "brightness",
-        topic_base,
-    )
-    brightness_state_suffix, brightness_state_topic = _derive_topic_pair(
-        topics_data,
-        "brightness_state",
-        f"{brightness_suffix}/state",
-        topic_base,
-    )
-    _, alert_topic = _derive_topic_pair(topics_data, "alert", "alert", topic_base)
-    _, status_topic = _derive_topic_pair(topics_data, "status", "status", topic_base)
-    _, lwt_topic = _derive_topic_pair(topics_data, "lwt", "lwt", topic_base)
+    
     topics = TopicMap(
         base=topic_base,
-        power=power_topic,
-        power_state=power_state_topic,
-        mode=mode_topic,
-        mode_state=mode_state_topic,
-        color=color_topic,
-        color_state=color_state_topic,
-        brightness=brightness_topic,
-        brightness_state=brightness_state_topic,
-        alert=alert_topic,
-        status=status_topic,
-        lwt=lwt_topic,
+        state_topic=f"{topic_base}/status",
+        command_topic=f"{topic_base}/switch",
+        rgb_command_topic=f"{topic_base}/rgb/set",
+        brightness_command_topic=f"{topic_base}/brightness/set",
+        effect_command_topic=f"{topic_base}/effect/set",
+        effect_state_topic=f"{topic_base}/status",
+        lwt=f"{topic_base}/lwt",
     )
 
     home_assistant = HomeAssistantSettings(
@@ -235,7 +192,7 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
         health_topic=_require_str(
             observability_data,
             "health_topic",
-            default=status_topic,
+            default=f"{topic_base}/status",
         ),
         log_level=_require_str(observability_data, "log_level", default="INFO"),
     )
@@ -405,16 +362,12 @@ def _validate_profile(profile: ConfigProfile) -> None:
 
     for topic in (
         profile.topics.base,
-        profile.topics.power,
-        profile.topics.power_state,
-        profile.topics.mode,
-        profile.topics.mode_state,
-        profile.topics.color,
-        profile.topics.color_state,
-        profile.topics.brightness,
-        profile.topics.brightness_state,
-        profile.topics.alert,
-        profile.topics.status,
+        profile.topics.state_topic,
+        profile.topics.command_topic,
+        profile.topics.rgb_command_topic,
+        profile.topics.brightness_command_topic,
+        profile.topics.effect_command_topic,
+        profile.topics.effect_state_topic,
         profile.topics.lwt,
     ):
         if not topic or " " in topic:

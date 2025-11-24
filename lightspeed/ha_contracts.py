@@ -30,108 +30,70 @@ def _device_descriptor(profile: ConfigProfile) -> dict:
 
 def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage]:
     device = _device_descriptor(profile)
+    ha = profile.home_assistant
+    topics = profile.topics
+    
     availability = [
         {
-            "topic": profile.topics.lwt,
-            "payload_on": "online",
-            "payload_off": "offline",
+            "topic": topics.lwt,
+            "payload_available": "online",
+            "payload_not_available": "offline",
         }
     ]
-    alert_payload = json.dumps({"type": "alert"}, separators=(",", ":"))
-    warning_payload = json.dumps({"type": "warning"}, separators=(",", ":"))
-    info_payload = json.dumps({"type": "info"}, separators=(",", ":"))
+    
     components = {
-        "color_light": {
+        "light": {
             "platform": "light",
-            "unique_id": f"{profile.home_assistant.device_id}_color",
-            "object_id": f"{profile.home_assistant.device_id}_color",
-            "name": f"{device['name']} Couleur",
-            "schema": "json",
-            "command_topic": profile.topics.color,
-            "state_topic": profile.topics.color_state,
-            "brightness_command_topic": profile.topics.brightness,
-            "brightness_state_topic": profile.topics.brightness_state,
-            "supported_color_modes": ["rgb"],
-            "optimistic": True,
+            "unique_id": f"{ha.device_id}_light",
+            "object_id": f"{ha.device_id}_light",
+            "name": f"{device['name']} Éclairage",
+            "optimistic": False,
+            "state_topic": topics.state_topic,
+            "state_value_template": "{{ value_json.state }}",
+            "command_topic": topics.command_topic,
+            "payload_on": "on",
+            "payload_off": "off",
+            "rgb_command_topic": topics.rgb_command_topic,
+            "rgb_value_template": "{{ value_json.rgb | join(',') }}",
+            "brightness_command_topic": topics.brightness_command_topic,
+            "brightness_value_template": "{{ value_json.brightness }}",
+            "effect": True,
+            "effect_command_topic": topics.effect_command_topic,
+            "effect_list": ["None", "Alert", "Warn", "Info"],
+            "effect_state_topic": topics.effect_state_topic,
+            "effect_value_template": "{{ value_json.effect }}",
         },
-        "alert_button": {
-            "platform": "button",
-            "unique_id": f"{profile.home_assistant.device_id}_alert",
-            "object_id": f"{profile.home_assistant.device_id}_alert",
-            "name": f"{device['name']} Alert",
-            "command_topic": profile.topics.alert,
-            "payload_press": alert_payload,
-        },
-        "warning_button": {
-            "platform": "button",
-            "unique_id": f"{profile.home_assistant.device_id}_warning",
-            "object_id": f"{profile.home_assistant.device_id}_warning",
-            "name": f"{device['name']} Warning",
-            "command_topic": profile.topics.alert,
-            "payload_press": warning_payload,
-        },
-        "info_button": {
-            "platform": "button",
-            "unique_id": f"{profile.home_assistant.device_id}_info",
-            "object_id": f"{profile.home_assistant.device_id}_info",
-            "name": f"{device['name']} Info",
-            "command_topic": profile.topics.alert,
-            "payload_press": info_payload,
-        },
-        "power_switch": {
-            "platform": "switch",
-            "unique_id": f"{profile.home_assistant.device_id}_power",
-            "object_id": f"{profile.home_assistant.device_id}_power",
-            "name": f"{device['name']} Power",
-            "command_topic": profile.topics.power,
-            "state_topic": profile.topics.power_state,
-            "payload_on": "ON",
-            "payload_off": "OFF",
+        "status_sensor": {
+            "platform": "binary_sensor",
+            "unique_id": f"{ha.device_id}_status",
+            "object_id": f"{ha.device_id}_status",
+            "name": f"{device['name']} Statut",
+            "state_topic": topics.state_topic,
+            "payload_on": "on",
+            "payload_off": "off",
+            "value_template": "{{ value_json.state }}",
+            "json_attributes_topic": topics.state_topic,
         },
         "mode_switch": {
             "platform": "switch",
-            "unique_id": f"{profile.home_assistant.device_id}_mode",
-            "object_id": f"{profile.home_assistant.device_id}_mode",
+            "unique_id": f"{ha.device_id}_mode",
+            "object_id": f"{ha.device_id}_mode",
             "name": f"{device['name']} Mode",
-            "command_topic": profile.topics.mode,
-            "state_topic": profile.topics.mode_state,
+            "command_topic": topics.command_topic,
+            "state_topic": topics.state_topic,
+            "value_template": "{{ value_json.mode }}",
             "payload_on": "pilot",
-            "payload_off": "logi",
-        },
-        "status_binary_sensor": {
-            "platform": "binary_sensor",
-            "unique_id": f"{profile.home_assistant.device_id}_status",
-            "object_id": f"{profile.home_assistant.device_id}_status",
-            "name": f"{device['name']} Statut",
-            "state_topic": profile.topics.status,
-            "payload_on": "online",
-            "payload_off": "offline",
-            "value_template": "{{ value_json.state }}",
-            "json_attributes_topic": profile.topics.status,
-        },
-        "availability_sensor": {
-            "platform": "binary_sensor",
-            "unique_id": f"{profile.home_assistant.device_id}_availability",
-            "object_id": f"{profile.home_assistant.device_id}_availability",
-            "name": f"{device['name']} Disponibilité",
-            "state_topic": profile.topics.lwt,
-            "payload_on": "online",
-            "payload_off": "offline",
-        },
-        "mode_sensor": {
-            "platform": "sensor",
-            "unique_id": f"{profile.home_assistant.device_id}_mode_state",
-            "object_id": f"{profile.home_assistant.device_id}_mode_state",
-            "name": f"{device['name']} Mode actuel",
-            "state_topic": profile.topics.mode_state,
+            "payload_off": "auto",
         },
     }
-
+    
     payload = {
         "device": device,
         "origin": {"name": device["name"]},
         "components": components,
         "availability": availability,
     }
-    topic = f"{DISCOVERY_PREFIX}/device/{profile.home_assistant.device_id}/config"
+    
+    topic = f"{DISCOVERY_PREFIX}/device/{ha.device_id}/config"
+    
     return [DiscoveryMessage(topic=topic, payload=json.dumps(payload, separators=(",", ":")))]

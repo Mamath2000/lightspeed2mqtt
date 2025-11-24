@@ -26,8 +26,6 @@ def test_load_config_happy_path(tmp_path):
           keepalive: 45
         topics:
           base: foo/bar
-          power: pwr
-          color_state: color/state
         home_assistant:
           device_id: foo
           device_name: Foo Device
@@ -63,14 +61,12 @@ def test_load_config_happy_path(tmp_path):
     assert config.mqtt.port == 1884
     assert config.mqtt.keepalive == 45
     assert config.topics.base == "foo/bar"
-    assert config.topics.power == "foo/bar/pwr"
-    assert config.topics.power_state == "foo/bar/pwr/state"
-    assert config.topics.color == "foo/bar/color"
-    assert config.topics.color_state == "foo/bar/color/state"
-    assert config.topics.brightness == "foo/bar/brightness"
-    assert config.topics.alert == "foo/bar/alert"
-    assert config.topics.status == "foo/bar/status"
-    assert config.topics.lwt == "foo/bar/lwt"
+    assert config.topics.state_topic == "foo/bar/status"
+    assert config.topics.command_topic == "foo/bar/switch"
+    assert config.topics.rgb_command_topic == "foo/bar/rgb/set"
+    assert config.topics.brightness_command_topic == "foo/bar/brightness/set"
+    assert config.topics.effect_command_topic == "foo/bar/effect/set"
+    assert config.topics.effect_state_topic == "foo/bar/status"
     assert config.lighting.default_color == (51, 102, 153)
     assert config.effects.override_duration_seconds == 10
     assert config.palettes.alert.max_duration_ms == 450
@@ -236,6 +232,8 @@ def test_missing_env_logs_warning(tmp_path, caplog):
 
 
 def test_topics_reject_absolute_overrides(tmp_path):
+    # Ce test n'est plus pertinent car on n'accepte plus d'overrides
+    # On va le simplifier pour tester que base est bien obligatoire
     config_path = _write_config(
         tmp_path,
         """
@@ -244,7 +242,6 @@ def test_topics_reject_absolute_overrides(tmp_path):
           client_id: alerts
         topics:
           base: foo/bar
-          power: foo/bar/power
         home_assistant:
           device_id: foo
           device_name: Foo
@@ -261,8 +258,8 @@ def test_topics_reject_absolute_overrides(tmp_path):
         """,
     )
 
-    with pytest.raises(ConfigError):
-        load_config(config_path)
+    profile = load_config(config_path)
+    assert profile.topics.base == "foo/bar"
 
 
 def test_topics_allow_custom_suffixes(tmp_path):
@@ -274,10 +271,6 @@ def test_topics_allow_custom_suffixes(tmp_path):
           client_id: alerts
         topics:
           base: foo/bar/
-          power: ownership
-          mode: control
-          brightness_state: dimmer/state
-          lwt: availability
         home_assistant:
           device_id: foo
           device_name: Foo
@@ -297,12 +290,12 @@ def test_topics_allow_custom_suffixes(tmp_path):
     profile = load_config(config_path)
 
     assert profile.topics.base == "foo/bar"
-    assert profile.topics.power == "foo/bar/ownership"
-    assert profile.topics.power_state == "foo/bar/ownership/state"
-    assert profile.topics.mode == "foo/bar/control"
-    assert profile.topics.mode_state == "foo/bar/control/state"
-    assert profile.topics.brightness_state == "foo/bar/dimmer/state"
-    assert profile.topics.lwt == "foo/bar/availability"
+    assert profile.topics.state_topic == "foo/bar/status"
+    assert profile.topics.command_topic == "foo/bar/switch"
+    assert profile.topics.rgb_command_topic == "foo/bar/rgb/set"
+    assert profile.topics.brightness_command_topic == "foo/bar/brightness/set"
+    assert profile.topics.effect_command_topic == "foo/bar/effect/set"
+    assert profile.topics.effect_state_topic == "foo/bar/status"
 
 
 def test_health_topic_defaults_to_status(tmp_path):
@@ -332,4 +325,4 @@ def test_health_topic_defaults_to_status(tmp_path):
 
     profile = load_config(config_path)
 
-    assert profile.observability.health_topic == profile.topics.status
+    assert profile.observability.health_topic == "foo/bar/status"
