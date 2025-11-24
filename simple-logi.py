@@ -92,7 +92,10 @@ def wait_loop(duration: float) -> None:
 
 def run_cli_color(profile: ConfigProfile, value: str, duration: float) -> None:
     lighting = _lighting_module()
-    controller = lighting.LightingController(profile.logitech.dll_path)
+    controller = lighting.LightingController(
+        profile.logitech.dll_path,
+        lock_file=profile.lighting.lock_file,
+    )
     try:
         controller.set_static_color(lighting.parse_color_string(value))
         wait_loop(duration)
@@ -102,7 +105,10 @@ def run_cli_color(profile: ConfigProfile, value: str, duration: float) -> None:
 
 def run_cli_pattern(profile: ConfigProfile, frames: Sequence[PatternFrame], duration: float) -> None:
     lighting = _lighting_module()
-    controller = lighting.LightingController(profile.logitech.dll_path)
+    controller = lighting.LightingController(
+        profile.logitech.dll_path,
+        lock_file=profile.lighting.lock_file,
+    )
     try:
         controller.start_pattern(frames)
         wait_loop(duration)
@@ -112,12 +118,22 @@ def run_cli_pattern(profile: ConfigProfile, frames: Sequence[PatternFrame], dura
 
 def run_cli_auto(profile: ConfigProfile) -> None:
     lighting = _lighting_module()
-    controller = lighting.LightingController(profile.logitech.dll_path)
+    controller = lighting.LightingController(
+        profile.logitech.dll_path,
+        lock_file=profile.lighting.lock_file,
+    )
     try:
         controller.start()
         controller.release()
     finally:
         controller.shutdown()
+
+
+def _pilot_state_topic(profile: ConfigProfile) -> str:
+    legacy = getattr(profile.topics, "auto_state", None)
+    if legacy:
+        return legacy
+    return profile.topics.mode_state
 
 
 def _read_pilot_switch_state(
@@ -143,7 +159,7 @@ def _read_pilot_switch_state(
             logger.warning("Connexion bootstrap pilot échouée", extra={"code": rc})
             event.set()
             return
-        mqtt_client.subscribe(profile.topics.auto_state, qos=1)
+        mqtt_client.subscribe(_pilot_state_topic(profile), qos=1)
 
     def _on_message(_mqtt_client, _userdata, message):
         state["value"] = message.payload.decode("utf-8", errors="ignore").strip().upper()
@@ -231,7 +247,10 @@ def main() -> None:
     if command == 'serve':
         lighting = _lighting_module()
         service = MqttLightingService(
-            lighting.LightingController(profile.logitech.dll_path),
+            lighting.LightingController(
+                profile.logitech.dll_path,
+                lock_file=profile.lighting.lock_file,
+            ),
             profile,
             validated_at=validated_at,
         )
@@ -243,7 +262,7 @@ def main() -> None:
                 extra={"pilot_switch": "ON" if bootstrap_state else "OFF"},
             )
         else:
-            logger.info("Aucun état pilot retenu détecté", extra={"topic": profile.topics.auto_state})
+            logger.info("Aucun état pilot retenu détecté", extra={"topic": _pilot_state_topic(profile)})
         try:
             service.start()
             service.loop_forever()

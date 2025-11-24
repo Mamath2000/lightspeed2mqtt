@@ -10,6 +10,9 @@ from lightspeed.config import ConfigProfile
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from lightspeed.control_mode import ControlMode
+    from paho.mqtt.client import Client as MqttClient
+else:  # pragma: no cover - runtime typing fallback
+    MqttClient = Any
 
 _LOG_CONFIGURED = False
 
@@ -91,3 +94,48 @@ def override_log_context(
     if invalid_value is not None:
         context["override_invalid_value"] = invalid_value
     return context
+
+
+def configure_last_will(client: "MqttClient", profile: ConfigProfile) -> None:
+    client.will_set(
+        profile.topics.lwt,
+        payload="offline",
+        qos=1,
+        retain=True,
+    )
+
+
+def publish_status(
+    client: "MqttClient",
+    profile: ConfigProfile,
+    control: "ControlMode",
+    *,
+    state: str = "online",
+    reason: Optional[str] = None,
+) -> None:
+    payload = build_status_payload(control, state=state, reason=reason)
+    client.publish(profile.topics.status, payload=payload, qos=1, retain=True)
+
+
+def publish_health(
+    client: "MqttClient",
+    profile: ConfigProfile,
+    *,
+    status: str,
+    validated_at: datetime,
+    validation_status: str,
+    last_error: Optional[str] = None,
+) -> None:
+    payload = build_health_payload(
+        profile,
+        status=status,
+        validated_at=validated_at,
+        validation_status=validation_status,
+        last_error=last_error,
+    )
+    target = profile.observability.health_topic or profile.topics.status
+    client.publish(target, payload=payload, qos=1, retain=True)
+
+
+def publish_availability(client: "MqttClient", profile: ConfigProfile, state: str) -> None:
+    client.publish(profile.topics.lwt, payload=state, qos=1, retain=True)

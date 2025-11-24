@@ -18,11 +18,12 @@
     "state_topic": "<topics.auto_state>",
     "payload_on": "ON",
     "payload_off": "OFF",
-    "availability": [{"topic": "<topics.status>"}]
+    "availability": [{"topic": "<topics.status>"}],
+    "retain": true
   }
   ```
 
-- **Command Payloads**: Literal strings `ON` or `OFF`.
+- **Command Payloads**: Literal strings `ON` or `OFF` (commands retained to keep HA UI in sync across reboots).
 - **State Payloads**: Literal strings `ON` or `OFF` (retained).
 - **Behavior**:
   - `ON`: integration claims lighting control (Pilot mode) and replays cached color if light is also `ON`.
@@ -84,14 +85,17 @@
 ## Status Sensor (`components.status_binary_sensor`)
 
 - **State Topic**: `topics.status`
-- **Payloads**: `online` / `offline`
-- **Attributes** (JSON appended as separate topic or inline log entry):
+- **Payloads**: Retained JSON object; `availability` (string) still indicates `online` / `offline` for compatibility.
+- **Attributes** (JSON fields within the same payload):
 
   ```json
   {
+    "availability": "online" | "offline",
     "mode": "pilot" | "off" | "override_alert" | "override_warning",
     "pilot_switch": "ON" | "OFF",
-    "light_state": "ON" | "OFF"
+    "light_state": "ON" | "OFF",
+    "override_type": null | "alert" | "warning",
+    "remaining_seconds": null | int
   }
   ```
 

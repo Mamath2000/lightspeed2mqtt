@@ -1,6 +1,6 @@
-# Journal de vérification manuelle – 25 novembre 2025
+# Journal de vérification manuelle – 24 novembre 2025
 
-Ce document trace les vérifications manuelles effectuées après l'intégration du flux `config.yaml`.
+Ce document trace les vérifications manuelles effectuées après l'intégration du schéma « Base-Relative Topic ». Les étapes ci-dessous doivent être répétées à chaque fois que `topics.base`, la configuration MQTT, ou le workflow Pilot/Alert évolue.
 
 ## Environnement
 
@@ -27,7 +27,7 @@ Variables d'environnement manquantes dans C:\Users\Mamat\OneDrive\Documents\ligh
   • Validée : 2025-11-23T22:13:24.065603+00:00
 ```
 
-La commande retourne le code `0`, confirmant que le template partagé reste valide après les derniers changements, y compris les champs `topics.auto_state` et `effects.override_duration_seconds`.
+La commande retourne le code `0`, confirmant que le template partagé reste valide après les derniers changements (suffixes dérivés `power/mode/color/brightness/alert/status/lwt`).
 
 ### 2. Service + flux Pilot/Light
 
@@ -37,49 +37,64 @@ python simple-logi.py serve --config config.yaml
 
 Observations attendues (avec broker MQTT + clavier Logitech branchés) :
 
-1. Les logs `Configuration chargée`, `Connecté au broker` puis `Etat pilot_switch=OFF` apparaissent. Le service republie immédiatement l'état retenu (`topics.auto_state`).
-2. Publication `"ON"` sur `topics.auto` (ou bascule du switch Home Assistant) force `pilot_switch=ON`, `mode=pilot`, et rejoue la dernière couleur en moins de 2 s.
-3. Publication `{"state":"OFF"}` sur `topics.color` libère l'éclairage (`LogiLedRestoreLighting()`), même si le Pilot reste ON. Le statut MQTT expose alors `light_state=OFF`.
-4. Repasser `{"state":"ON"}` sans payload couleur réapplique automatiquement `{last_color,last_brightness}` mis en cache.
-5. Envoyer une commande couleur pendant que le Pilot est OFF laisse Logitech maître des LED et enregistre `reason=color_ignored_pilot_off` dans `topics.status`.
+1. Les logs `Configuration chargée`, `Connecté au broker` puis `Etat pilot_switch=...` apparaissent. Le service republie immédiatement tous les topics retenus (`<base>/mode/state`, `<base>/power/state`, `<base>/color/state`, `<base>/status`, `<base>/lwt`).
+2. Publication `"pilot"` sur `<base>/mode` (ou bascule du switch Home Assistant) force `pilot_switch=ON`, `light_state=ON`, et rejoue la dernière couleur en moins de 2 s.
+3. Publication `{"state":"OFF"}` sur `<base>/color` libère l'éclairage (`restore_logitech_control`), même si Pilot reste ON. Le statut MQTT expose alors `light_state=OFF` et `reason=color_ignored_light_off` si une couleur arrive pendant OFF.
+4. Repasser `{"state":"ON"}` sans payload couleur réapplique automatiquement `{last_color,last_brightness}` mis en cache et republie `<base>/color/state`.
+5. Envoyer une commande couleur pendant que Pilot est `logi` laisse Logitech maître des LED et enregistre `reason=color_ignored_pilot_off` dans `topics.status`.
 
-### 3. Overrides temporaires
+### 3. Overrides + disponibilité
 
 ```pwsh
-# Alert/Warn depuis Home Assistant ou via MQTT direct
+# Alert/Warn via CLI (équivaut à publier JSON sur <base>/alert)
 python simple-logi.py alert --duration 5 --config config.yaml
 python simple-logi.py warning --duration 7 --config config.yaml
+
+# MQTT direct depuis PowerShell
+mosquitto_pub -h $env:MQTT_HOST -t "lightspeed/alerts/mode" -m "pilot" -r
+mosquitto_pub -h $env:MQTT_HOST -t "lightspeed/alerts/alert" -m '{"type":"alert","duration":15}'
+mosquitto_sub -h $env:MQTT_HOST -t "lightspeed/alerts/status" -C 1
 ```
 
 Attendus :
 
-1. Chaque override publie `mode=override_alert|override_warning`, démarre un minuteur, puis revient automatiquement à `pilot` ou `off` selon l'état des entités.
-2. Lancer Warning pendant Alert interrompt la première animation instantanément (`override_action=replaced`).
-3. Basculer le Pilot switch OFF/OFF annule l'override et remet Logitech aux commandes (aucune reprise différée).
-4. Payloads invalides (`duration: 0`, texte, >300) génèrent `WARNING override_action=invalid_duration` sans planter.
+1. Chaque override publie `state=override_alert|override_warning` dans `<base>/status`, démarre un minuteur (`duration_seconds = payload.duration`), puis revient automatiquement à `pilot` ou `logi` selon l'état précédent.
+2. Lancer Warning pendant Alert interrompt la première animation instantanément (`reason=alert_replaced`).
+3. Basculer Pilot sur `logi` ou publier `OFF` sur `<base>/power` annule l'override, arrête le timer et remet Logitech aux commandes.
+4. Payloads invalides (`duration=0`, texte, >300, type inconnu) génèrent un warning et aucun pattern ne démarre.
+5. `mosquitto_sub -t <base>/lwt` doit montrer `online` après la connexion initiale, puis `offline` si vous tuez le process (`Ctrl+C`) sans `loop_stop`.
 
-## Étapes consolidées (à exécuter sur le poste cible)
+## Étapes consolidées (poste cible)
 
-Ces vérifications nécessitent le SDK Logitech (`LogitechLed.dll`) et un broker MQTT accessibles. Réalisez-les depuis la machine où tourne réellement le service :
+Ces vérifications nécessitent le SDK Logitech (`LogitechLed.dll`), un broker MQTT accessible et une configuration `topics.base` cohérente. Effectuez-les dans l'ordre :
 
 1. **Copie & personnalisation**
    - `Copy-Item config.example.yaml config.yaml`
-   - Renseignez les topics/métadonnées HA et remplacez `${MQTT_PASSWORD}` par une variable d'environnement définie.
+   - Renseignez `mqtt.*`, `topics.base`, les métadonnées Home Assistant, et exportez `${MQTT_PASSWORD}`.
 2. **Validation finale**
    - `python simple-logi.py validate-config --config config.yaml`
-   - Corrigez toute erreur signalée avant de poursuivre (les erreurs sur `topics.auto_state` ou `override_duration_seconds` sont bloquantes).
+   - Corrigez toute erreur (suffixes contenant `/`, durées hors 1-300, manque de DLL) avant d'aller plus loin.
 3. **Démarrage du service**
    - `python simple-logi.py serve --config config.yaml`
-   - Attendez les logs `Configuration chargée`, `Connecté au broker`, et vérifiez que `topics.status` publie `mode=off` ou `pilot` selon l'état retenu.
+   - Vérifiez dans les logs que le client configure le Last Will (`<base>/lwt = offline`) puis publie `online`.
 4. **Tests Pilot/Light**
-   - Dans Home Assistant, basculez le switch Pilot ON/OFF et observez l'éclairage + `topics.auto_state`.
-   - Éteignez puis rallumez la Light; Logitech doit reprendre la main pendant OFF et la couleur précédente doit revenir instantanément pendant ON.
-5. **Tests overrides**
-   - Appuyez sur Alert/Warning. Les palettes doivent durer exactement `effects.override_duration_seconds` (ou la valeur envoyée) puis revenir à l'état précédent.
-   - Lancez un second override ou basculez Pilot OFF pour confirmer que les minuteurs s'annulent sans délai.
-6. **CLI de secours**
+   - Depuis Home Assistant **ou** `mosquitto_pub` :
+     - `mosquitto_pub -t "<base>/mode" -m "pilot" -r`
+     - `mosquitto_pub -t "<base>/mode" -m "logi" -r`
+   - Confirmez que les publications parallèles `mode_state`, `power_state`, `status.reason` correspondent aux actions.
+   - Envoyez `{"state":"OFF"}` puis `{"state":"ON"}` sur `<base>/color` et vérifiez que Logitech reprend/relâche la main correctement.
+5. **Tests overrides JSON**
+   - `mosquitto_pub -t "<base>/alert" -m '{"type":"alert","duration":12}'`
+   - `mosquitto_pub -t "<base>/alert" -m '{"type":"warning"}'`
+   - Surveillez `mosquitto_sub -t "<base>/status"` pour voir `override_alert` → `override_warning` puis le retour à `pilot`.
+   - Envoyez une charge invalide (`{"type":"unknown"}`) pour vérifier la présence d'un warning et l'absence d'override.
+6. **Disponibilité / LWT**
+   - `mosquitto_sub -t "<base>/lwt" -v`
+   - Tuez le processus (`Ctrl+C`). Vous devez recevoir `offline` (message Last Will). Relancez `serve` pour voir `online`.
+7. **CLI de secours (optionnel)**
    - `python simple-logi.py color '#0080FF' --config config.yaml`
+   - `python simple-logi.py alert --duration 5 --config config.yaml`
    - `python simple-logi.py auto --config config.yaml`
-   - Assurez-vous que `color` n'est appliquée que lorsque Pilot est ON.
+   - Confirmez que ces commandes publient sur les mêmes sujets `<base>/<suffix>` que les automatisations.
 
 > **Note** : Ces étapes doivent être retestées à chaque changement de profils ou de topics. Documentez tout écart dans ce journal.

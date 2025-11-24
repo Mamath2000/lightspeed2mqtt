@@ -3,14 +3,16 @@
 ## Entities
 
 ### 1. ControlMode
+
 - **Purpose**: Tracks who currently owns keyboard lighting.
 - **States**: `pilot`, `off`, `override_alert`, `override_warning`.
 - **Fields**:
   - `state`: enum (values above).
-  - `pilot_switch_enabled`: bool (last-known HA switch state).
-  - `light_on`: bool (mirrors HA light entity on/off state).
+  - `pilot_switch_enabled`: bool (last-known HA switch state for discovery + telemetry).
+  - `light_on`: bool (mirrors HA light entity on/off state, even when commands ignored).
   - `last_color`: struct `{r:int, g:int, b:int}` (0–100 scaled percentages for Logitech SDK).
   - `last_brightness`: int (0–100, derived from HA payloads).
+  - `status_snapshot`: struct `{mode:str, override_type:Optional[str], remaining_seconds:Optional[int]}` published to retained status topic.
   - `updated_at`: datetime (monotonic timestamp for debouncing/resume logic).
 - **Relationships**: Owns a reference to `OverrideAction` when `state` starts with `override_*`.
 - **Validation Rules**:
@@ -19,6 +21,7 @@
   - Transitions between `pilot` and `off` require invoking Logitech restore/set helpers.
 
 ### 2. OverrideAction
+
 - **Purpose**: Describes an in-flight alert or warning override.
 - **Fields**:
   - `type`: enum (`alert`, `warning`).
@@ -31,10 +34,12 @@
   - `duration_seconds` defaults to config `override_duration_seconds` if button payload omits custom value.
 
 ### 3. ConfigurationProfile Extensions
+
 - **Purpose**: Extends existing YAML profile with new knobs.
 - **Fields**:
-  - `home_assistant.pilot_switch`: metadata for discovery (entity_id, friendly name, topics).
+  - `home_assistant.pilot_switch`: metadata for discovery (entity_id, friendly name, topics, `unique_id`).
   - `effects.override_duration_seconds`: int default 10.
+  - `observability.status_attributes`: optional map of extra keys to expose on retained status topic (default includes `mode`, `pilot_switch`, `light_state`).
 - **Validation Rules**:
   - Duration must be between 1 and 300 seconds.
   - `pilot_switch` inherits availability/status topics from profile; no empty strings allowed.
@@ -63,10 +68,10 @@ graph TD
 - Command Topics:
   - `topics.color`: JSON `{ "state": "ON|OFF", "color": {"r":0-255,...}, "brightness":0-255 }`.
   - `topics.alert`, `topics.warning`: string `ON` (override request) or JSON with `duration` override (optional future).
-  - `topics.auto` (renamed logically as Pilot switch): payload `ON`/`OFF`.
+  - `topics.auto`: payload `ON`/`OFF` retained so HA immediately reflects switch state.
 - State Topics:
-  - `topics.status`: `online`/`offline` retained.
-  - New `topics.auto_state`: mirrors switch; may reuse command topic with retain.
+  - `topics.status`: JSON payload `{ "availability":"online|offline", "mode":"pilot|off|override_*", "pilot_switch":"ON|OFF", "light_state":"ON|OFF", "override_type":null|"alert|warning", "remaining_seconds":int? }` retained.
+  - `topics.auto_state`: mirrors switch; may reuse command topic with retain if broker permissions restrict new topics.
 
 ## Validation & Error Handling
 

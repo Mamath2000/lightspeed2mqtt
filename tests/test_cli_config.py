@@ -244,14 +244,22 @@ def _load_profile(tmp_path: Path):
   return load_config(config_path)
 
 
+def test_pilot_state_topic_derives_from_base(simple_logi_module, tmp_path):
+  profile = _load_profile(tmp_path)
+  assert simple_logi_module._pilot_state_topic(profile) == profile.topics.mode_state
+
+
 def test_read_pilot_switch_state_returns_bool(simple_logi_module, tmp_path, monkeypatch):
   profile = _load_profile(tmp_path)
+
+  created_clients = []
 
   class _FakeBootstrapClient:
     def __init__(self, *_, **__):
       self.on_connect = None
       self.on_message = None
       self.subscriptions = []
+      created_clients.append(self)
 
     def username_pw_set(self, *_args, **_kwargs):
       return None
@@ -290,6 +298,7 @@ def test_read_pilot_switch_state_returns_bool(simple_logi_module, tmp_path, monk
   state = simple_logi_module._read_pilot_switch_state(profile, logger=logger)
 
   assert state is False
+  assert created_clients[0].subscriptions == [(profile.topics.mode_state, 1)]
 
 
 def test_read_pilot_switch_state_handles_errors(simple_logi_module, tmp_path, monkeypatch):

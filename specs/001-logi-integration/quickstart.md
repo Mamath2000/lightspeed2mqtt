@@ -37,12 +37,17 @@ mqtt:
 
 topics:
   base: lightspeed/alerts # Préfixe commun pour toutes les entités HA
-  color: "" # Laisser vide pour dériver <base>/color, sinon fournir un topic complet
-  alert: ""
-  warning: ""
-  auto: ""
-  auto_state: "" # Topic retained pour exposer l'état du switch (défaut = <auto>)
-  status: "" # Topic de disponibilité / santé
+  power: "" # Laisser vide pour dériver <base>/power (payload ON/OFF retenu)
+  power_state: "" # Retained miroir (défaut = <topics.power>/state)
+  mode: "" # Laisser vide pour dériver <base>/mode (payload pilot/logi)
+  mode_state: "" # Retained miroir du mode
+  color: "" # Commandes RGB dérivées (<base>/color)
+  color_state: "" # Retained couleur (<topics.color>/state)
+  brightness: "" # Commandes 0-100 dérivées (<base>/brightness)
+  brightness_state: "" # Retained luminosité (<topics.brightness>/state)
+  alert: "" # Overrides JSON (type/duration) dérivés (<base>/alert)
+  status: "" # Sujet JSON retained (<base>/status)
+  lwt: "" # Sujet availability online/offline (<base>/lwt)
 
 home_assistant:
   device_id: lightspeed-alerts
@@ -82,7 +87,7 @@ logitech:
   profile_backup: "backup.json" # Fichier où stocker l'état initial
 
 observability:
-  health_topic: "lightspeed/alerts/health"
+  health_topic: "" # Laisser vide pour réutiliser <topics.status>
   log_level: "INFO"
 ```
 <!-- config-example:end -->
@@ -97,12 +102,17 @@ observability:
 | `mqtt.client_id` | Nom unique du client MQTT | `lightspeed-led` |
 | `mqtt.keepalive` | Intervalle keepalive en secondes | `60` |
 | `topics.base` | Préfixe commun pour tous les topics | `lightspeed/alerts` |
-| `topics.color` | Topic pour les commandes de couleur | `<base>/color` |
-| `topics.alert` | Topic pour déclencher le pattern alerte | `<base>/alert` |
-| `topics.warning` | Topic pour déclencher le pattern warning | `<base>/warning` |
-| `topics.auto` | Topic pour rendre la main à Logitech | `<base>/auto` |
-| `topics.auto_state` | Topic retained exposant l'état du switch piloté | `<base>/auto/state` |
-| `topics.status` | Topic retained online/offline | `<base>/status` |
+| `topics.power` | Suffixe ON/OFF retenu pour l'ownership | `<base>/power` |
+| `topics.power_state` | Miroir retained confirmant le dernier payload ON/OFF | `<topics.power>/state` |
+| `topics.mode` | Commande retenue pilot/logi pour prendre la main | `<base>/mode` |
+| `topics.mode_state` | Miroir retained pour refléter le mode actif | `<topics.mode>/state` |
+| `topics.color` | Commandes RGB (#RRGGBB, R,G,B ou JSON {r,g,b}) | `<base>/color` |
+| `topics.color_state` | Miroir retained de la dernière couleur acceptée | `<topics.color>/state` |
+| `topics.brightness` | Commande 0-100 (implique power=ON) | `<base>/brightness` |
+| `topics.brightness_state` | Miroir retained de la luminosité | `<topics.brightness>/state` |
+| `topics.alert` | Sujet JSON pour alert/warning/info (non retained) | `<base>/alert` |
+| `topics.status` | JSON retained online/offline + attributs | `<base>/status` |
+| `topics.lwt` | Disponibilité MQTT publish/Last Will online/offline | `<base>/lwt` |
 | `home_assistant.device_id` | Identifiant unique Home Assistant | `lightspeed-alerts` |
 | `home_assistant.device_name` | Nom présenté dans HA | `Logitech Alerts` |
 | `home_assistant.manufacturer` | Fabricant affiché | `Logitech` |
@@ -116,7 +126,7 @@ observability:
 | `palettes.warning.max_duration_ms` | Durée max warning | `350` |
 | `logitech.dll_path` | Chemin personnalisé vers LogitechLed.dll |  |
 | `logitech.profile_backup` | Sauvegarde du profil initial | `backup.json` |
-| `observability.health_topic` | Topic JSON de santé retenu | `<base>/health` |
+| `observability.health_topic` | Topic JSON de santé retenu | `<topics.status>` |
 | `observability.log_level` | Niveau de logs | `INFO` |
 <!-- config-table:end -->
 

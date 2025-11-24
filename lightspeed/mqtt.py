@@ -5,16 +5,25 @@ import json
 import logging
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass
 from datetime import datetime
 from types import ModuleType
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Deque, Dict, Tuple
 
 import paho.mqtt.client as mqtt
 
 from lightspeed.config import ConfigProfile
-from lightspeed.control_mode import ControlMode
+from lightspeed.control_mode import ControlMode, Mode, mode_payload_from_switch, parse_mode_payload
 from lightspeed.ha_contracts import iter_discovery_messages
-from lightspeed.observability import build_health_payload, build_status_payload, override_log_context, override_reason
+from lightspeed.observability import (
+    configure_last_will,
+    override_log_context,
+    override_reason,
+    publish_availability,
+    publish_health,
+    publish_status,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - type hints only
     from lightspeed.lighting import LightingController
@@ -22,6 +31,12 @@ if TYPE_CHECKING:  # pragma: no cover - type hints only
 
 _LIGHTING_MODULE: ModuleType | None = None
 RGB = Tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class AlertCommand:
+    kind: str
+    duration: int
 
 
 def _lighting_module() -> ModuleType:
@@ -115,6 +130,16 @@ def _extract_brightness(data: dict) -> int | None:
     return None
 
 
+def _percent_to_byte(value: int) -> int:
+    value = max(0, min(100, int(value)))
+    return int(round((value / 100) * 255))
+
+
+def _byte_to_percent(value: int) -> int:
+    value = max(0, min(255, int(value)))
+    return int(round((value / 255) * 100))
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,16 +155,12 @@ class MqttLightingService:
         self._connected = False
         self.client = mqtt.Client(client_id=profile.mqtt.client_id, clean_session=True)
         self._timer_factory = threading.Timer
+        self._local_echo: Dict[str, Deque[str]] = {}
         if profile.mqtt.username:
             self.client.username_pw_set(profile.mqtt.username, profile.mqtt.password or None)
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
-        self.client.will_set(
-            profile.topics.status,
-            payload=build_status_payload(self.control, state="offline", reason="lwt"),
-            qos=1,
-            retain=True,
-        )
+        configure_last_will(self.client, self.profile)
 
     def start(self) -> None:
         self.controller.start()
@@ -181,14 +202,19 @@ class MqttLightingService:
         self._connected = True
         for topic in (
             self.profile.topics.color,
+            self.profile.topics.brightness,
+            self.profile.topics.power,
+            self.profile.topics.mode,
             self.profile.topics.alert,
-            self.profile.topics.warning,
-            self.profile.topics.auto,
         ):
             client.subscribe(topic, qos=1)
         logger.info("Connecté au broker")
+        self._publish_availability("online")
         self._publish_status(reason="connected")
-        self._publish_switch_state("ON" if self.control.pilot_switch else "OFF")
+        self._publish_mode_state()
+        self._publish_power_state("ON" if self.control.light_on else "OFF")
+        self._publish_brightness_state(_byte_to_percent(self.control.last_brightness))
+        self._publish_color_state(self.control.last_command_color, self.control.last_brightness)
         self._publish_health("online")
         self._publish_discovery()
 
@@ -196,14 +222,21 @@ class MqttLightingService:
         topic = message.topic
         payload = message.payload.decode("utf-8", errors="ignore").strip()
         try:
-            if topic == self.profile.topics.color:
+            if self._consume_local_echo(topic, payload):
+                return
+            if topic == self.profile.topics.power:
+                self._handle_power_command(payload)
+            elif topic == self.profile.topics.mode:
+                self._handle_mode_command(payload)
+            elif topic == self.profile.topics.color:
                 requested_state = _extract_light_state(payload)
                 if requested_state == "OFF":
-                    self._handle_light_off(reason="ha_light_off")
+                    self._handle_power_command("OFF")
                     return
                 if requested_state == "ON" and not self.control.light_on:
                     control = self.control.set_light_state(on=True)
                     self._update_control(control, reason="ha_light_on")
+                    self._publish_power_state("ON")
                 if not self.control.pilot_switch:
                     logger.info("Commande couleur ignorée (pilot OFF)")
                     self._publish_status(reason="color_ignored_pilot_off")
@@ -236,13 +269,16 @@ class MqttLightingService:
                     brightness=brightness,
                 )
                 self._update_control(updated, reason="color_command")
+                self._publish_power_state("ON")
+                self._publish_color_state(updated.last_command_color, updated.last_brightness)
+                self._publish_brightness_state(_byte_to_percent(updated.last_brightness))
                 logger.info("Couleur appliquée", extra={"color": color_to_apply})
+            elif topic == self.profile.topics.brightness:
+                self._handle_brightness_command(payload)
             elif topic == self.profile.topics.alert:
-                self._handle_override_command(kind="alert", payload=payload)
-            elif topic == self.profile.topics.warning:
-                self._handle_override_command(kind="warning", payload=payload)
-            elif topic == self.profile.topics.auto:
-                self._handle_pilot_switch(payload)
+                command = self._parse_alert_command(payload)
+                if command:
+                    self._handle_override_command(command)
             else:
                 logger.debug("Topic ignoré", extra={"topic": topic})
             self.last_error = None
@@ -255,23 +291,74 @@ class MqttLightingService:
     def _publish_status(self, *, state: str = "online", reason: str | None = None) -> None:
         if not self._connected:
             return
-        payload = build_status_payload(self.control, state=state, reason=reason)
-        self.client.publish(self.profile.topics.status, payload=payload, qos=1, retain=True)
+        publish_status(self.client, self.profile, self.control, state=state, reason=reason)
+        if state == "offline":
+            self._publish_availability("offline")
 
     def _publish_health(self, status: str) -> None:
-        payload = build_health_payload(
+        publish_health(
+            self.client,
             self.profile,
             status=status,
             validated_at=self.validated_at,
             validation_status=self.validation_status,
             last_error=self.last_error,
         )
-        self.client.publish(
-            self.profile.observability.health_topic,
-            payload=payload,
-            qos=1,
-            retain=True,
+
+    def _publish_availability(self, state: str) -> None:
+        if not self._connected:
+            return
+        publish_availability(self.client, self.profile, state)
+
+    def _publish_power_state(self, payload: str) -> None:
+        if not self._connected:
+            return
+        self.client.publish(self.profile.topics.power_state, payload=payload, qos=1, retain=True)
+
+    def _publish_mode_state(self, payload: str | None = None) -> None:
+        if not self._connected:
+            return
+        normalized = (payload or "").strip().lower()
+        if normalized not in {Mode.PILOT.value, Mode.LOGI.value}:
+            normalized = mode_payload_from_switch(self.control.pilot_switch)
+        self._record_local_publish(self.profile.topics.mode, normalized)
+        self.client.publish(self.profile.topics.mode, payload=normalized, qos=1, retain=True)
+        self.client.publish(self.profile.topics.mode_state, payload=normalized, qos=1, retain=True)
+
+    def _publish_color_state(self, color: RGB, brightness: int) -> None:
+        if not self._connected:
+            return
+        payload = json.dumps(
+            {
+                "state": "ON" if self.control.light_on else "OFF",
+                "color": {"r": color[0], "g": color[1], "b": color[2]},
+                "brightness": brightness,
+            },
+            separators=(",", ":"),
         )
+        self.client.publish(self.profile.topics.color_state, payload=payload, qos=1, retain=True)
+
+    def _publish_brightness_state(self, brightness_pct: int) -> None:
+        if not self._connected:
+            return
+        brightness_pct = max(0, min(100, brightness_pct))
+        payload = json.dumps({"brightness": brightness_pct}, separators=(",", ":"))
+        self.client.publish(self.profile.topics.brightness_state, payload=payload, qos=1, retain=True)
+
+    def _record_local_publish(self, topic: str, payload: str) -> None:
+        queue = self._local_echo.setdefault(topic, deque())
+        queue.append(payload)
+
+    def _consume_local_echo(self, topic: str, payload: str) -> bool:
+        queue = self._local_echo.get(topic)
+        if not queue:
+            return False
+        if queue[0] == payload:
+            queue.popleft()
+            if not queue:
+                self._local_echo.pop(topic, None)
+            return True
+        return False
 
     def _publish_discovery(self) -> None:
         for message in iter_discovery_messages(self.profile):
@@ -285,49 +372,150 @@ class MqttLightingService:
         control = self.control.set_pilot_switch(enabled)
         self.control = control
 
-    def _handle_pilot_switch(self, payload: str) -> None:
+    def _handle_power_command(self, payload: str) -> None:
         desired = (payload or "").strip().upper()
+        if desired not in {"ON", "OFF"}:
+            logger.warning("Commande power invalide", extra={"payload": payload})
+            self._publish_power_state("ON" if self.control.light_on else "OFF")
+            return
         if desired == "ON":
-            self._enter_pilot_mode()
-        elif desired == "OFF":
-            self._exit_pilot_mode()
+            updated = self.control.set_light_state(on=True)
+            if updated.pilot_switch:
+                lighting = _lighting_module()
+                color_to_apply = lighting.apply_brightness(updated.last_command_color, updated.last_brightness)
+                self.controller.set_static_color(color_to_apply)
+            self._update_control(updated, reason="power_on")
+            self._publish_power_state("ON")
+            self._publish_brightness_state(_byte_to_percent(updated.last_brightness))
+            self._publish_color_state(updated.last_command_color, updated.last_brightness)
         else:
-            logger.warning("Commande pilot invalide", extra={"payload": payload})
+            self._handle_light_off(reason="power_off")
+
+    def _handle_brightness_command(self, payload: str) -> None:
+        value = self._parse_brightness_payload(payload)
+        if value is None:
+            logger.warning("Commande brightness invalide", extra={"payload": payload})
+            return
+        if not self.control.pilot_switch:
+            logger.info("Commande brightness ignorée (pilot OFF)")
+            self._publish_status(reason="brightness_ignored_pilot_off")
+            return
+        lighting = _lighting_module()
+        byte_value = _percent_to_byte(value)
+        color_to_apply = lighting.apply_brightness(self.control.last_command_color, byte_value)
+        self.controller.set_static_color(color_to_apply)
+        updated = self.control.record_color_command(
+            base_color=self.control.last_command_color,
+            brightness=byte_value,
+        )
+        self._update_control(updated, reason="brightness_command")
+        self._publish_power_state("ON")
+        self._publish_brightness_state(value)
+        self._publish_color_state(updated.last_command_color, updated.last_brightness)
+
+    def _parse_brightness_payload(self, payload: str) -> int | None:
+        if not payload:
+            return None
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            data = None
+        raw_value: object
+        if isinstance(data, dict) and "brightness" in data:
+            raw_value = data["brightness"]
+        else:
+            raw_value = payload
+        try:
+            value = int(raw_value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= value <= 100:
+            return None
+        return value
+
+    def _parse_alert_command(self, payload: str) -> AlertCommand | None:
+        default_duration = self.profile.effects.override_duration_seconds
+        if not payload:
+            return AlertCommand(kind="alert", duration=default_duration)
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            logger.warning("Commande alert invalide", extra={"payload": payload})
+            return None
+        if not isinstance(data, dict):
+            logger.warning("Commande alert invalide", extra={"payload": payload})
+            return None
+        type_value = data.get("type", "alert")
+        if isinstance(type_value, str):
+            normalized = type_value.strip().lower() or "alert"
+        else:
+            logger.warning("Commande alert invalide", extra={"payload": payload})
+            return None
+        if normalized == "info":
+            normalized = "alert"
+        if normalized not in {"alert", "warning"}:
+            logger.warning("Commande alert invalide", extra={"payload": payload})
+            return None
+        duration_value = data.get("duration")
+        if duration_value is None:
+            duration = default_duration
+        else:
+            try:
+                duration = int(duration_value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Durée override invalide",
+                    extra=override_log_context(normalized, action="invalid_duration", invalid_value=duration_value),
+                )
+                return None
+            if duration < 1 or duration > 300:
+                logger.warning(
+                    "Durée override hors limites",
+                    extra=override_log_context(normalized, action="invalid_duration", duration=duration),
+                )
+                return None
+        return AlertCommand(kind=normalized, duration=duration)
+
+    def _handle_mode_command(self, payload: str) -> None:
+        desired = parse_mode_payload(payload)
+        if desired is None:
+            logger.warning("Commande mode invalide", extra={"payload": payload})
+            self._publish_mode_state()
+            return
+        if desired is Mode.PILOT:
+            self._enter_pilot_mode()
+        else:
+            self._exit_pilot_mode()
 
     def _enter_pilot_mode(self) -> None:
         if self.control.pilot_switch:
-            self._publish_switch_state("ON")
+            self._publish_mode_state("pilot")
+            if not self.control.light_on:
+                self._handle_power_command("ON")
+            else:
+                self._publish_power_state("ON")
             return
         self._clear_override(resume_base=False, event="pilot_toggle")
         control = self.control.set_pilot_switch(True)
-        if control.light_on:
-            lighting = _lighting_module()
-            lighting.reapply_cached_color(
-                self.controller,
-                control.last_command_color,
-                control.last_brightness,
-            )
         self._update_control(control, reason="pilot_enable")
-        self._publish_switch_state("ON")
+        self._publish_mode_state("pilot")
+        self._handle_power_command("ON")
         logger.info("Mode pilot activé")
 
     def _exit_pilot_mode(self) -> None:
         if not self.control.pilot_switch:
-            self._publish_switch_state("OFF")
+            self._publish_mode_state("logi")
+            if self.control.light_on:
+                self._handle_power_command("OFF")
+            else:
+                self._publish_power_state("OFF")
             return
-        self._clear_override(resume_base=False, event="pilot_toggle")
-        lighting = _lighting_module()
-        lighting.restore_logitech_control(self.controller)
+        self._handle_light_off(reason="pilot_disable")
         self.controller.shutdown()
         control = self.control.set_pilot_switch(False)
         self._update_control(control, reason="pilot_disable")
-        self._publish_switch_state("OFF")
+        self._publish_mode_state("logi")
         logger.info("Mode pilot désactivé, Logitech reprend la main")
-
-    def _publish_switch_state(self, payload: str) -> None:
-        if not self._connected:
-            return
-        self.client.publish(self.profile.topics.auto_state, payload=payload, qos=1, retain=True)
 
     def _handle_light_off(self, *, reason: str) -> None:
         self._clear_override(resume_base=False, event="light_off")
@@ -335,64 +523,37 @@ class MqttLightingService:
         lighting.restore_logitech_control(self.controller)
         control = self.control.set_light_state(on=False)
         self._update_control(control, reason=reason)
+        self._publish_power_state("OFF")
+        self._publish_brightness_state(_byte_to_percent(control.last_brightness))
+        self._publish_color_state(control.last_command_color, control.last_brightness)
 
-    def _handle_override_command(self, *, kind: str, payload: str) -> None:
-        duration = self._resolve_override_duration(kind, payload)
-        if duration is None:
-            return
+    def _handle_override_command(self, command: AlertCommand) -> None:
         self._clear_override(resume_base=False, event="replaced")
         lighting = _lighting_module()
         frames = (
             lighting.alert_frames(self.profile)
-            if kind == "alert"
+            if command.kind == "alert"
             else lighting.warning_frames(self.profile)
         )
-        timer = self._timer_factory(duration, self._complete_override, args=(kind,))
+        timer = self._timer_factory(command.duration, self._complete_override, args=(command.kind,))
         timer.daemon = True
         timer.start()
         control = self.control.start_override(
-            kind=kind,
-            duration_seconds=duration,
+            kind=command.kind,
+            duration_seconds=command.duration,
             timer_handle=timer,
         )
         self.controller.start_pattern(frames)
         logger.info(
-            "Override %s démarrée", kind,
-            extra=override_log_context(kind, action="start", duration=duration),
+            "Override %s démarrée", command.kind,
+            extra=override_log_context(command.kind, action="start", duration=command.duration),
         )
-        self._update_control(control, reason=override_reason(kind, "start"))
+        self._update_control(control, reason=override_reason(command.kind, "start"))
 
     def _complete_override(self, kind: str) -> None:
         cleared = self._clear_override(resume_base=True, event="complete")
         if cleared:
             logger.info("Override %s terminée", kind, extra=override_log_context(kind, action="complete"))
-
-    def _resolve_override_duration(self, kind: str, payload: str) -> int | None:
-        base_duration = self.profile.effects.override_duration_seconds
-        if not payload:
-            return base_duration
-        try:
-            data = json.loads(payload)
-        except json.JSONDecodeError:
-            return base_duration
-        if isinstance(data, dict) and "duration" in data:
-            raw_value = data["duration"]
-            try:
-                requested = int(raw_value)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "Durée override invalide",
-                    extra=override_log_context(kind, action="invalid_duration", invalid_value=raw_value),
-                )
-                return None
-            if requested < 1 or requested > 300:
-                logger.warning(
-                    "Durée override hors limites",
-                    extra=override_log_context(kind, action="invalid_duration", duration=requested),
-                )
-                return None
-            return requested
-        return base_duration
 
     def _clear_override(self, *, resume_base: bool, event: str) -> bool:
         override = self.control.override

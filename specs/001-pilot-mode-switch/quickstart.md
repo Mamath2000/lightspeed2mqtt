@@ -20,6 +20,7 @@
    - Trigger the other override while one is active. The prior timer cancels, the palette switches, and a new `override_*_start` reason is published.
    - Toggle the Pilot switch or Light OFF during an override. The override must stop, Logitech regains control, and no timer remainder fires.
    - Provide invalid `duration` payloads (0, >300, text). The service logs a warning with `override_action=invalid_duration` and rejects the request.
+      - Observe `topics.status` retained payloads include `mode`, `pilot_switch`, `light_state`, `override_type`, and `remaining_seconds` (counting down while an override runs).
 
 5. **Validation Checklist (à exécuter sur le poste avec périphériques Logitech)**
    - [ ] `python simple-logi.py serve --config config.yaml` démarre, loggue `Connecté au broker`, et republie l'état retenu du Pilot switch.

@@ -26,6 +26,8 @@ def test_load_config_happy_path(tmp_path):
           keepalive: 45
         topics:
           base: foo/bar
+          power: pwr
+          color_state: color/state
         home_assistant:
           device_id: foo
           device_name: Foo Device
@@ -60,8 +62,15 @@ def test_load_config_happy_path(tmp_path):
 
     assert config.mqtt.port == 1884
     assert config.mqtt.keepalive == 45
+    assert config.topics.base == "foo/bar"
+    assert config.topics.power == "foo/bar/pwr"
+    assert config.topics.power_state == "foo/bar/pwr/state"
     assert config.topics.color == "foo/bar/color"
-    assert config.topics.auto_state == "foo/bar/auto/state"
+    assert config.topics.color_state == "foo/bar/color/state"
+    assert config.topics.brightness == "foo/bar/brightness"
+    assert config.topics.alert == "foo/bar/alert"
+    assert config.topics.status == "foo/bar/status"
+    assert config.topics.lwt == "foo/bar/lwt"
     assert config.lighting.default_color == (51, 102, 153)
     assert config.effects.override_duration_seconds == 10
     assert config.palettes.alert.max_duration_ms == 450
@@ -224,3 +233,103 @@ def test_missing_env_logs_warning(tmp_path, caplog):
 
     assert config.mqtt.password is None
     assert any("SECRET" in record.message for record in caplog.records)
+
+
+def test_topics_reject_absolute_overrides(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+        mqtt:
+          host: localhost
+          client_id: alerts
+        topics:
+          base: foo/bar
+          power: foo/bar/power
+        home_assistant:
+          device_id: foo
+          device_name: Foo
+          manufacturer: Test
+          model: RevA
+        lighting:
+          default_color: "#112233"
+          lock_file: lock
+        palettes: {}
+        logitech:
+          profile_backup: backup.json
+        observability:
+          log_level: INFO
+        """,
+    )
+
+    with pytest.raises(ConfigError):
+        load_config(config_path)
+
+
+def test_topics_allow_custom_suffixes(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+        mqtt:
+          host: localhost
+          client_id: alerts
+        topics:
+          base: foo/bar/
+          power: ownership
+          mode: control
+          brightness_state: dimmer/state
+          lwt: availability
+        home_assistant:
+          device_id: foo
+          device_name: Foo
+          manufacturer: Test
+          model: RevA
+        lighting:
+          default_color: "#112233"
+          lock_file: lock
+        palettes: {}
+        logitech:
+          profile_backup: backup.json
+        observability:
+          log_level: INFO
+        """,
+    )
+
+    profile = load_config(config_path)
+
+    assert profile.topics.base == "foo/bar"
+    assert profile.topics.power == "foo/bar/ownership"
+    assert profile.topics.power_state == "foo/bar/ownership/state"
+    assert profile.topics.mode == "foo/bar/control"
+    assert profile.topics.mode_state == "foo/bar/control/state"
+    assert profile.topics.brightness_state == "foo/bar/dimmer/state"
+    assert profile.topics.lwt == "foo/bar/availability"
+
+
+def test_health_topic_defaults_to_status(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+        mqtt:
+          host: localhost
+          client_id: alerts
+        topics:
+          base: foo/bar
+        home_assistant:
+          device_id: foo
+          device_name: Foo
+          manufacturer: Test
+          model: RevA
+        lighting:
+          default_color: "#112233"
+          lock_file: lock
+        palettes: {}
+        logitech:
+          profile_backup: backup.json
+        observability:
+          log_level: INFO
+        """,
+    )
+
+    profile = load_config(config_path)
+
+    assert profile.observability.health_topic == profile.topics.status

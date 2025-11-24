@@ -32,11 +32,14 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
     device = _device_descriptor(profile)
     availability = [
         {
-            "topic": profile.topics.status,
+            "topic": profile.topics.lwt,
             "payload_on": "online",
             "payload_off": "offline",
-            "value_template": "{{ value_json.state }}"
-            }]
+        }
+    ]
+    alert_payload = json.dumps({"type": "alert"}, separators=(",", ":"))
+    warning_payload = json.dumps({"type": "warning"}, separators=(",", ":"))
+    info_payload = json.dumps({"type": "info"}, separators=(",", ":"))
     components = {
         "color_light": {
             "platform": "light",
@@ -45,6 +48,9 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
             "name": f"{device['name']} Couleur",
             "schema": "json",
             "command_topic": profile.topics.color,
+            "state_topic": profile.topics.color_state,
+            "brightness_command_topic": profile.topics.brightness,
+            "brightness_state_topic": profile.topics.brightness_state,
             "supported_color_modes": ["rgb"],
             "optimistic": True,
         },
@@ -54,25 +60,43 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
             "object_id": f"{profile.home_assistant.device_id}_alert",
             "name": f"{device['name']} Alert",
             "command_topic": profile.topics.alert,
-            "payload_press": "ON",
+            "payload_press": alert_payload,
         },
         "warning_button": {
             "platform": "button",
             "unique_id": f"{profile.home_assistant.device_id}_warning",
             "object_id": f"{profile.home_assistant.device_id}_warning",
             "name": f"{device['name']} Warning",
-            "command_topic": profile.topics.warning,
-            "payload_press": "ON",
+            "command_topic": profile.topics.alert,
+            "payload_press": warning_payload,
         },
-        "pilot_switch": {
+        "info_button": {
+            "platform": "button",
+            "unique_id": f"{profile.home_assistant.device_id}_info",
+            "object_id": f"{profile.home_assistant.device_id}_info",
+            "name": f"{device['name']} Info",
+            "command_topic": profile.topics.alert,
+            "payload_press": info_payload,
+        },
+        "power_switch": {
             "platform": "switch",
-            "unique_id": f"{profile.home_assistant.device_id}_pilot",
-            "object_id": f"{profile.home_assistant.device_id}_pilot",
-            "name": f"{device['name']} Pilot",
-            "command_topic": profile.topics.auto,
-            "state_topic": profile.topics.auto_state,
+            "unique_id": f"{profile.home_assistant.device_id}_power",
+            "object_id": f"{profile.home_assistant.device_id}_power",
+            "name": f"{device['name']} Power",
+            "command_topic": profile.topics.power,
+            "state_topic": profile.topics.power_state,
             "payload_on": "ON",
             "payload_off": "OFF",
+        },
+        "mode_switch": {
+            "platform": "switch",
+            "unique_id": f"{profile.home_assistant.device_id}_mode",
+            "object_id": f"{profile.home_assistant.device_id}_mode",
+            "name": f"{device['name']} Mode",
+            "command_topic": profile.topics.mode,
+            "state_topic": profile.topics.mode_state,
+            "payload_on": "pilot",
+            "payload_off": "logi",
         },
         "status_binary_sensor": {
             "platform": "binary_sensor",
@@ -84,6 +108,22 @@ def iter_discovery_messages(profile: ConfigProfile) -> Iterable[DiscoveryMessage
             "payload_off": "offline",
             "value_template": "{{ value_json.state }}",
             "json_attributes_topic": profile.topics.status,
+        },
+        "availability_sensor": {
+            "platform": "binary_sensor",
+            "unique_id": f"{profile.home_assistant.device_id}_availability",
+            "object_id": f"{profile.home_assistant.device_id}_availability",
+            "name": f"{device['name']} Disponibilité",
+            "state_topic": profile.topics.lwt,
+            "payload_on": "online",
+            "payload_off": "offline",
+        },
+        "mode_sensor": {
+            "platform": "sensor",
+            "unique_id": f"{profile.home_assistant.device_id}_mode_state",
+            "object_id": f"{profile.home_assistant.device_id}_mode_state",
+            "name": f"{device['name']} Mode actuel",
+            "state_topic": profile.topics.mode_state,
         },
     }
 

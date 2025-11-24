@@ -1,11 +1,42 @@
 from __future__ import annotations
 
 import json
+import sys
 import textwrap
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, cast
 
 import paho.mqtt.client as mqtt
+
+
+class _StubLogiLed:
+    def __init__(self) -> None:
+        self.led_dll = None
+
+    def logi_led_init(self):  # pragma: no cover - stub keeps SDK optional during tests
+        return True
+
+    def logi_led_save_current_lighting(self):  # pragma: no cover - stubbed side effects
+        return True
+
+    def logi_led_restore_lighting(self):  # pragma: no cover - stubbed side effects
+        return True
+
+    def logi_led_shutdown(self):  # pragma: no cover - stubbed side effects
+        return True
+
+    def logi_led_set_lighting(self, *_args, **_kwargs):  # pragma: no cover - stubbed side effects
+        return True
+
+
+sys.modules["logipy"] = SimpleNamespace(logi_led=_StubLogiLed())
+
+
+def _alert_payload(kind: str = "alert", **overrides: object) -> bytes:
+    body: dict[str, object] = {"type": kind}
+    body.update(overrides)
+    return json.dumps(body, separators=(",", ":")).encode("utf-8")
 
 from lightspeed.config import load_config
 from lightspeed.lighting import apply_brightness
@@ -170,7 +201,8 @@ def _build_profile(tmp_path):
         logitech:
           profile_backup: backup.json
         observability:
-          log_level: INFO
+                    health_topic: foo/bar/health
+                    log_level: INFO
         """,
     )
     return load_config(config_path)
@@ -200,6 +232,18 @@ def _payload(entry: dict[str, object]) -> str:
 
 def _controller(service: MqttLightingService) -> _FakeController:
     return cast(_FakeController, service.controller)
+
+
+def _drain_initial_mode_echo(service: MqttLightingService, client: _FakeClient) -> None:
+    retained = _FakeMqttMessage(service.profile.topics.mode, b"pilot")
+    service.on_message(_client_for_callback(client), None, retained)
+
+
+def _connect_service(service: MqttLightingService) -> _FakeClient:
+    client = _client(service)
+    service.on_connect(_client_for_callback(client), None, None, 0)
+    _drain_initial_mode_echo(service, client)
+    return client
 
 
 class _FakeTimer:
@@ -263,56 +307,61 @@ def test_bootstrap_pilot_switch_updates_initial_state(monkeypatch, tmp_path):
 
 def test_pilot_switch_state_republished_on_connect(monkeypatch, tmp_path):
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
 
-    service.on_connect(_client_for_callback(client), None, None, 0)
+    mode_command = client.last_publish(service.profile.topics.mode)
+    assert mode_command["payload"] == "pilot"
+    assert mode_command["retain"] is True
 
-    auto_state = client.last_publish(service.profile.topics.auto_state)
-    assert auto_state["payload"] == "ON"
-    assert auto_state["retain"] is True
+    mode_state = client.last_publish(service.profile.topics.mode_state)
+    assert mode_state["payload"] == "pilot"
+    assert mode_state["retain"] is True
 
 
 def test_pilot_switch_off_updates_control_and_status(monkeypatch, tmp_path):
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
     controller = _controller(service)
-    service.on_connect(_client_for_callback(client), None, None, 0)
 
-    message = _FakeMqttMessage(service.profile.topics.auto, b"OFF")
+    message = _FakeMqttMessage(service.profile.topics.mode, b"logi")
     service.on_message(_client_for_callback(client), None, message)
 
     assert controller.released == 1
     assert controller.shutdown_calls == 1
     assert service.control.pilot_switch is False
-    auto_state = client.last_publish(service.profile.topics.auto_state)
-    assert auto_state["payload"] == "OFF"
+    mode_state = client.last_publish(service.profile.topics.mode_state)
+    assert mode_state["payload"] == "logi"
+    assert client.last_publish(service.profile.topics.mode)["payload"] == "logi"
     status_payload = client.last_publish(service.profile.topics.status)
-    assert json.loads(_payload(status_payload))["mode"] == "off"
+    assert json.loads(_payload(status_payload))["mode"] == "logi"
 
 
 def test_pilot_switch_on_replays_cached_color(monkeypatch, tmp_path):
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
     controller = _controller(service)
-    service.on_connect(_client_for_callback(client), None, None, 0)
 
     # Simulate cached color and pilot OFF state
     service.control = service.control.record_color_command(base_color=(10, 20, 30), brightness=200)
-    service.on_message(_client_for_callback(client), None, _FakeMqttMessage(service.profile.topics.auto, b"OFF"))
+    service.on_message(_client_for_callback(client), None, _FakeMqttMessage(service.profile.topics.mode, b"logi"))
 
     controller.colors.clear()
-    service.on_message(_client_for_callback(client), None, _FakeMqttMessage(service.profile.topics.auto, b"ON"))
+    service.on_message(_client_for_callback(client), None, _FakeMqttMessage(service.profile.topics.mode, b"pilot"))
 
-    assert controller.colors[-1] == apply_brightness((10, 20, 30), 200)
     assert service.control.pilot_switch is True
-    assert client.last_publish(service.profile.topics.auto_state)["payload"] == "ON"
+    assert service.control.light_on is True
+    assert client.last_publish(service.profile.topics.mode_state)["payload"] == "pilot"
+    assert client.last_publish(service.profile.topics.mode)["payload"] == "pilot"
+    color_state = json.loads(_payload(client.last_publish(service.profile.topics.color_state)))
+    assert color_state["color"] == {"r": 10, "g": 20, "b": 30}
+    assert color_state["brightness"] == 200
+    assert color_state["state"] == "ON"
 
 
 def test_light_off_command_releases_control(monkeypatch, tmp_path):
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
     controller = _controller(service)
-    service.on_connect(_client_for_callback(client), None, None, 0)
 
     payload = json.dumps({"state": "OFF"})
     service.on_message(_client_for_callback(client), None, _FakeMqttMessage(service.profile.topics.color, payload.encode("utf-8")))
@@ -320,14 +369,13 @@ def test_light_off_command_releases_control(monkeypatch, tmp_path):
     assert controller.released == 1
     assert service.control.light_on is False
     status_payload = json.loads(_payload(client.last_publish(service.profile.topics.status)))
-    assert status_payload["mode"] == "off"
+    assert status_payload["mode"] == "pilot"
 
 
 def test_light_on_without_color_replays_cached_values(monkeypatch, tmp_path):
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
     controller = _controller(service)
-    service.on_connect(_client_for_callback(client), None, None, 0)
 
     color_payload = json.dumps(
         {
@@ -356,11 +404,10 @@ def test_light_on_without_color_replays_cached_values(monkeypatch, tmp_path):
 
 def test_color_commands_ignored_when_pilot_off(monkeypatch, tmp_path):
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
     controller = _controller(service)
-    service.on_connect(_client_for_callback(client), None, None, 0)
 
-    service.on_message(_client_for_callback(client), None, _FakeMqttMessage(service.profile.topics.auto, b"OFF"))
+    service.on_message(_client_for_callback(client), None, _FakeMqttMessage(service.profile.topics.mode, b"logi"))
     controller.colors.clear()
 
     color_payload = json.dumps(
@@ -376,9 +423,8 @@ def test_color_commands_ignored_when_pilot_off(monkeypatch, tmp_path):
 
 def test_color_commands_ignored_when_light_off(monkeypatch, tmp_path):
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
     controller = _controller(service)
-    service.on_connect(_client_for_callback(client), None, None, 0)
 
     service.on_message(
         _client_for_callback(client),
@@ -401,16 +447,49 @@ def _setup_override_env(monkeypatch, tmp_path):
     timers: list[_FakeTimer] = []
     _install_fake_timer(monkeypatch, timers)
     service = _make_service(tmp_path, monkeypatch)
-    client = _client(service)
+    client = _connect_service(service)
     controller = _controller(service)
-    service.on_connect(_client_for_callback(client), None, None, 0)
     return service, controller, override_lighting, timers
+
+
+def test_client_sets_last_will(monkeypatch, tmp_path):
+    service = _make_service(tmp_path, monkeypatch)
+    client = _client(service)
+
+    assert client.will == {
+        "topic": service.profile.topics.lwt,
+        "payload": "offline",
+        "qos": 1,
+        "retain": True,
+    }
+
+
+def test_availability_online_published_on_connect(monkeypatch, tmp_path):
+    service = _make_service(tmp_path, monkeypatch)
+    client = _connect_service(service)
+
+    availability = client.last_publish(service.profile.topics.lwt)
+    assert availability["payload"] == "online"
+    assert availability["retain"] is True
+
+
+def test_offline_status_updates_availability(monkeypatch, tmp_path):
+    service = _make_service(tmp_path, monkeypatch)
+    client = _connect_service(service)
+
+    service._publish_status(state="offline", reason="test")
+
+    availability = client.last_publish(service.profile.topics.lwt)
+    assert availability["payload"] == "offline"
+    assert availability["retain"] is True
 
 
 def test_alert_override_runs_until_timer_and_restores_color(monkeypatch, tmp_path):
     service, controller, override_lighting, timers = _setup_override_env(monkeypatch, tmp_path)
 
-    service.on_message(_client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, b"ON"))
+    service.on_message(
+        _client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, _alert_payload("alert"))
+    )
 
     assert controller.patterns[-1] == (("alert",),)
     assert service.control.state.value == "override_alert"
@@ -426,9 +505,13 @@ def test_alert_override_runs_until_timer_and_restores_color(monkeypatch, tmp_pat
 def test_warning_override_replaces_alert(monkeypatch, tmp_path):
     service, controller, override_lighting, timers = _setup_override_env(monkeypatch, tmp_path)
 
-    service.on_message(_client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, b"ON"))
+    service.on_message(
+        _client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, _alert_payload("alert"))
+    )
     first_timer = timers[0]
-    service.on_message(_client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.warning, b"ON"))
+    service.on_message(
+        _client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, _alert_payload("warning"))
+    )
 
     assert first_timer.cancelled is True
     assert controller.patterns[-1] == (("warning",),)
@@ -444,13 +527,57 @@ def test_warning_override_replaces_alert(monkeypatch, tmp_path):
 def test_override_cancels_when_pilot_switch_changes(monkeypatch, tmp_path):
     service, controller, override_lighting, timers = _setup_override_env(monkeypatch, tmp_path)
 
-    service.on_message(_client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, b"ON"))
-    message = _FakeMqttMessage(service.profile.topics.auto, b"OFF")
+    service.on_message(
+        _client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, _alert_payload("alert"))
+    )
+    message = _FakeMqttMessage(service.profile.topics.mode, b"logi")
     service.on_message(_client_for_callback(_client(service)), None, message)
 
     assert timers[0].cancelled is True
     assert service.control.override is None
-    assert service.control.state.value == "off"
+    assert service.control.state.value == "logi"
     assert controller.stop_calls == 1
     assert controller.released >= 1
     assert override_lighting.reapplied == []
+
+
+def test_info_payload_maps_to_alert(monkeypatch, tmp_path):
+    service, controller, override_lighting, timers = _setup_override_env(monkeypatch, tmp_path)
+
+    service.on_message(
+        _client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, _alert_payload("info"))
+    )
+
+    assert controller.patterns[-1] == (("alert",),)
+    assert timers[-1].interval == service.profile.effects.override_duration_seconds
+
+
+def test_alert_payload_requires_json(monkeypatch, tmp_path):
+    service, controller, _override_lighting, timers = _setup_override_env(monkeypatch, tmp_path)
+
+    service.on_message(
+        _client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, b"alert")
+    )
+
+    assert controller.patterns == []
+    assert timers == []
+
+
+def test_alert_payload_rejects_out_of_bounds_duration(monkeypatch, tmp_path):
+    service, controller, _override_lighting, timers = _setup_override_env(monkeypatch, tmp_path)
+
+    payload = _alert_payload("alert", duration=400)
+    service.on_message(_client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, payload))
+
+    assert controller.patterns == []
+    assert timers == []
+
+
+def test_alert_payload_applies_custom_duration(monkeypatch, tmp_path):
+    service, controller, _override_lighting, timers = _setup_override_env(monkeypatch, tmp_path)
+
+    payload = _alert_payload("warning", duration=15)
+    service.on_message(_client_for_callback(_client(service)), None, _FakeMqttMessage(service.profile.topics.alert, payload))
+
+    assert controller.patterns[-1] == (("warning",),)
+    assert timers[-1].interval == 15

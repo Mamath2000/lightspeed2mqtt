@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import logging
 import os
 import threading
 import time
@@ -20,6 +21,7 @@ except ImportError as exc:  # pragma: no cover - logipy is required at runtime
 
 RGB = Tuple[int, int, int]
 PatternFrame = Tuple[RGB, float]
+logger = logging.getLogger(__name__)
 
 
 def clamp_channel(value: int) -> int:
@@ -68,24 +70,69 @@ def parse_color_string(value: str) -> RGB:
 
 
 class LightingController:
-    def __init__(self, dll_path: Optional[str] = None) -> None:
+    def __init__(self, dll_path: Optional[str] = None, *, lock_file: Optional[str] = None) -> None:
         self.lock = threading.Lock()
         self.pattern_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
         self.initialized = False
         self.released = False
         self.dll_path = Path(dll_path).expanduser() if dll_path else None
+        self.lock_file = Path(lock_file).expanduser() if lock_file else None
+
+    def _acquire_lock(self) -> None:
+        if not self.lock_file:
+            return
+        try:
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:  # pragma: no cover - best effort path creation
+            pass
+        if self.lock_file.exists():
+            raise RuntimeError(
+                f"Le verrou {self.lock_file} existe déjà. Assurez-vous qu'aucune autre instance n'est en cours ou supprimez le fichier."
+            )
+        payload = {
+            "pid": os.getpid(),
+            "timestamp": time.time(),
+        }
+        self.lock_file.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+
+    def _release_lock(self) -> None:
+        if not self.lock_file:
+            return
+        try:
+            self.lock_file.unlink()
+        except FileNotFoundError:  # pragma: no cover - already absent
+            return
+        except OSError:  # pragma: no cover - removable warning only
+            logger.warning("Impossible de supprimer le verrou %s", self.lock_file)
+
+    def _reattach_control(self) -> None:
+        if not self.released:
+            return
+        self._acquire_lock()
+        with self.lock:
+            logi_led.logi_led_save_current_lighting()
+        self.released = False
 
     def start(self) -> None:
         if self.initialized:
             return
         if not ensure_logi_dll_loaded(self.dll_path):
             raise RuntimeError("Impossible de trouver 'LogitechLed.dll'. Définissez LOGI_LED_DLL ou placez la DLL à la racine.")
-        if not logi_led.logi_led_init():
-            raise RuntimeError("Impossible d'initialiser le SDK Logitech. Vérifiez que G Hub / LGS est en cours d'exécution.")
-        logi_led.logi_led_save_current_lighting()
-        self.initialized = True
-        self.released = False
+        self._acquire_lock()
+        try:
+            if not logi_led.logi_led_init():
+                raise RuntimeError(
+                    "Impossible d'initialiser le SDK Logitech. Vérifiez que G Hub / LGS est en cours d'exécution."
+                )
+            logi_led.logi_led_save_current_lighting()
+            self.initialized = True
+            self.released = False
+        except Exception:
+            self._release_lock()
+            self.initialized = False
+            self.released = False
+            raise
 
     def shutdown(self) -> None:
         self.stop_pattern()
@@ -93,7 +140,9 @@ class LightingController:
             with self.lock:
                 logi_led.logi_led_restore_lighting()
                 logi_led.logi_led_shutdown()
+        self._release_lock()
         self.initialized = False
+        self.released = False
 
     def _set_color_now(self, rgb: RGB) -> None:
         r, g, b = (clamp_channel(channel) for channel in rgb)
@@ -102,10 +151,7 @@ class LightingController:
 
     def set_static_color(self, rgb: RGB) -> None:
         self.start()
-        if self.released:
-            with self.lock:
-                logi_led.logi_led_save_current_lighting()
-            self.released = False
+        self._reattach_control()
         self.stop_pattern()
         self._set_color_now(rgb)
 
@@ -114,6 +160,7 @@ class LightingController:
             raise ValueError("Aucun frame fourni pour le pattern")
         self.start()
         self.stop_pattern()
+        self._reattach_control()
         self.released = False
         self.stop_event = threading.Event()
 
@@ -145,6 +192,7 @@ class LightingController:
         self.stop_pattern()
         with self.lock:
             logi_led.logi_led_restore_lighting()
+        self._release_lock()
         self.released = True
 
 

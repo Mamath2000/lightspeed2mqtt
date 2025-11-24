@@ -10,14 +10,20 @@ mqtt:
   client_id: lightspeed-led # Nom du client MQTT
   keepalive: 60 # Intervalle keepalive en secondes
 
+
 topics:
   base: lightspeed # Préfixe commun pour toutes les entités HA
-  color: "color" # Laisser vide pour dériver <base>/color, sinon fournir un topic complet
-  alert: "alert"
-  warning: "warning"
-  auto: "auto"
-  auto_state: "" # Topic retained pour exposer l'état du switch (défaut = <auto>)
-  status: "lightspeed/health" # Topic de disponibilité / santé
+  power: "" # Laisser vide pour dériver <base>/power (payload ON/OFF retenu)
+  power_state: "" # Retained miroir (défaut = <topics.power>/state)
+  mode: "" # Laisser vide pour dériver <base>/mode (payload pilot/logi)
+  mode_state: "" # Retained miroir du mode
+  color: "" # Commandes RGB dérivées (<base>/color)
+  color_state: "" # Retained couleur (<topics.color>/state)
+  brightness: "" # Commandes 0-100 dérivées (<base>/brightness)
+  brightness_state: "" # Retained luminosité (<topics.brightness>/state)
+  alert: "" # Overrides JSON (type/duration) dérivés (<base>/alert)
+  status: "" # Sujet JSON retained (<base>/status)
+  lwt: "" # Sujet availability online/offline (<base>/lwt)
 
 home_assistant:
   device_id: lightspeed
@@ -32,7 +38,7 @@ lighting:
   lock_file: "lightspeed.lock" # Verrou pour éviter les accès concurrents
 
 effects:
-  override_duration_seconds: 10 # Durée Alert/Warning en secondes (entre 1 et 300)
+  override_duration_seconds: 6 # Durée Alert/Warning en secondes (entre 1 et 300)
 
 palettes:
   alert:

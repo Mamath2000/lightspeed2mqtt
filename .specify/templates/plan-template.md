@@ -31,7 +31,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+[Gates determined based on constitution file. Document how the work stays within the canonical MQTT topics (`power`, `mode`, `color`, `brightness`, `alert`) and their approved payloads.]
 
 ## Project Structure
 

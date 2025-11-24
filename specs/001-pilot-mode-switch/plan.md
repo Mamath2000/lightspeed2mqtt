@@ -1,43 +1,37 @@
-# Implementation Plan: Pilot Mode Switch & Temporary Alerts
+﻿# Implementation Plan: Pilot Mode Switch & Temporary Alerts
 
 **Branch**: `001-pilot-mode-switch` | **Date**: 2025-11-24 | **Spec**: [specs/001-pilot-mode-switch/spec.md](spec.md)
 **Input**: Feature specification from `/specs/001-pilot-mode-switch/spec.md`
 
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+**Note**: This plan drives `/speckit.tasks` and `/speckit.implement`. Follow the phased workflow exactly.
 
 ## Summary
 
-Add a Home Assistant Pilot switch that explicitly grants or releases keyboard control, ensure the Light entity mirrors HA on/off semantics, and make Alert/Warning overrides temporary with a configurable duration that restores the previous state automatically. Implementation will extend existing MQTT handlers, config schema, and discovery payloads while preserving Logitech LED control handoffs.
+Replace the legacy Auto button with a Home Assistant switch that explicitly governs Pilot (integration-controlled) or Off (Logitech-controlled) mode, enforce Light entity on/off semantics, and make Alert/Warning overrides time-bound so they revert to the prior mode automatically. Work touches MQTT discovery payloads, `ControlMode` orchestration, override timers, and configuration validation/doc updates so that HA operators get deterministic ownership and observability.
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
-
-**Language/Version**: Python 3.13  
-**Primary Dependencies**: `paho-mqtt`, `logipy` (Logitech LED SDK wrapper), `click`, `pyyaml`  
-**Storage**: N/A (in-memory state only)  
-**Testing**: `pytest` with unit tests under `tests/`  
-**Target Platform**: Windows host running Logitech LED SDK + MQTT broker connectivity  
-**Project Type**: Single Python service/CLI  
-**Performance Goals**: Process MQTT events <100 ms, keep overrides bounded (≤10 s default, configurable up to 300 s)  
-**Constraints**: Must relinquish lighting on demand, retain discovery compatibility, keep CPU minimal during effects  
-**Scale/Scope**: Single-user peripheral control; MQTT topics limited to existing namespace
+**Language/Version**: Python 3.13 (single-process CLI + MQTT service)  
+**Primary Dependencies**: `paho-mqtt`, `logipy` (LogitechLed.dll bridge), `pyyaml`, `click`  
+**Storage**: In-memory state + retained MQTT topics (no external DB)  
+**Testing**: `pytest` suite under `tests/` with MQTT + config stubs  
+**Target Platform**: Windows host with Logitech G Hub/LGS and an MQTT broker (HA/Mosquitto)  
+**Project Type**: Single Python service/CLI entrypoint (`simple-logi.py`)  
+**Performance Goals**: Process MQTT commands within 100 ms, enforce override timers ≤300 s, resume saved colors within 1 s  
+**Constraints**: Honor Logitech save/restore semantics, Python-only surface, bounded alert frames (≤500 ms), documented MQTT contracts  
+**Scale/Scope**: One keyboard per process instance; limited MQTT topics scoped under configured base prefix
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-1. **Momentary Control** – Plan keeps explicit Pilot/Off states plus override timers that always hand control back after duration, satisfying Principle I.
-2. **MQTT Contracts** – We will continue using existing topics (`color`, `alert`, `warning`, `auto`/pilot switch) and documented JSON payloads; no new schema introduced.
-3. **Python-Only Surface** – All changes touch current Python modules (`simple-logi.py`, `lightspeed/*`); no new runtimes are introduced.
-4. **Safe Alert Patterns** – Alert/Warning effects already meet interval/palette bounds; we only add timers and resumptions, so Principle IV stays satisfied.
-5. **Observable Operations** – Existing logging in `lightspeed.mqtt` will be extended to include Pilot switch state, override start/stop, and restoration outcomes per Principle V.
+1. **Momentary Control (I)** – Pilot/Off transitions must always save last RGB payload and release Logitech control on Off; overrides cannot outlive configured timer and must restore prior owner.
+2. **Explicit MQTT Contracts (II)** – Replaces Auto topic with HA switch + buttons but keeps schemas documented through updated discovery payloads and contracts docs.
+3. **Python-Only Surface (III)** – All changes remain in `lightspeed/*.py`, CLI wiring, config docs, and pytest suites—no new runtimes or services.
+4. **Safe Alert Patterns (IV)** – Override durations configurable but clamped (0 < t ≤ 300 s); alert/warning frame pacing unchanged.
+5. **Observable Operations (V)** – Retained status topics/reporting extended to include Pilot/Off/Override state plus logs at each transition for troubleshooting.
 
-**Post-Design Re-Evaluation**: Data model + contracts keep momentary control guarantees (override timers), reuse existing MQTT topics, remain Python-only, bound alert durations via config validation, and document new logging touchpoints—no gate violations detected.
+**Post-Design Re-Evaluation**: `data-model.md`, `ha-mqtt-contract.md`, and `quickstart.md` all preserve save/restore semantics, keep MQTT schemas explicit (no new topics beyond documented switch/light/override/status set), rely solely on Python components, keep alert durations bounded by config validation, and enhance observability with retained status attributes—no constitution risks detected.
 
 ## Project Structure
 
@@ -45,49 +39,47 @@ Add a Home Assistant Pilot switch that explicitly grants or releases keyboard co
 
 ```text
 specs/001-pilot-mode-switch/
-├── plan.md
-├── research.md
-├── data-model.md
-├── quickstart.md
+├── plan.md              # This file (/speckit.plan output)
+├── research.md          # Phase 0 deliverable
+├── data-model.md        # Phase 1 deliverable
+├── quickstart.md        # Phase 1 deliverable
 ├── contracts/
-│   └── ha-mqtt-contract.md
-└── tasks.md   # to be produced during /speckit.tasks
+│   └── ha-mqtt-contract.md  # Phase 1 deliverable
+└── tasks.md             # Generated later by /speckit.tasks
 ```
 
 ### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
 
 ```text
 lightspeed2mqtt/
-├── simple-logi.py            # CLI entrypoint / MQTT service runner
+├── simple-logi.py            # CLI entry (serve/color/alert/warning/auto)
 ├── lightspeed/
-│   ├── config.py             # YAML parsing + validation
-│   ├── mqtt.py               # MQTT loop, color/light handlers
-│   ├── lighting.py           # Logitech LED control helpers
-│   ├── ha_contracts.py       # Discovery payload generation
-│   └── observability.py      # logging + structured status helpers
+│   ├── config.py             # YAML loading + validation
+│   ├── control_mode.py       # Pilot/off state machine & overrides
+│   ├── mqtt.py               # MQTT client + HA discovery/topics
+│   ├── lighting.py           # Logitech LED orchestration, palettes
+│   ├── ha_contracts.py       # Discovery payload builders
+│   ├── observability.py      # Structured logging/status topics
+│   └── config_docs.py        # Derived config reference
 ├── tests/
+│   ├── test_config.py
+│   ├── test_cli_config.py
+│   ├── test_control_mode.py
 │   ├── test_mqtt_light.py
 │   ├── test_ha_contracts.py
-│   └── other config validation suites
+│   └── test_observability.py
 ├── docs/
-│   └── validation/manual-verification.md
+│   └── validation/
+├── config.example.yaml       # Canonical config template
+├── requirements.txt
+├── scripts/
 └── specs/
-  └── 001-pilot-mode-switch/...
+    ├── 001-pilot-mode-switch/
+    └── 001-update-topics-schema/
 ```
 
-**Structure Decision**: Single Python service with top-level `simple-logi.py`, domain modules in `lightspeed/`, and pytest suites under `tests/`.
+**Structure Decision**: Single Python package (`lightspeed/`) with CLI entrypoint plus pytest suite; feature work lives in config, MQTT, control, contracts, docs, and tests under this tree.
 
 ## Complexity Tracking
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
-
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+No constitution deviations identified; table not required.

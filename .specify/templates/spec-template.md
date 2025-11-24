@@ -80,6 +80,7 @@
 <!--
   ACTION REQUIRED: The content in this section represents placeholders.
   Fill them out with the right functional requirements.
+  When the feature touches MQTT, reference the canonical topics (`power`, `mode`, `color`, `brightness`, `alert`) and their approved payloads per the constitution.
 -->
 
 ### Functional Requirements

@@ -15,9 +15,24 @@ def _now() -> datetime:
 
 class Mode(str, Enum):
     PILOT = "pilot"
-    OFF = "off"
+    LOGI = "logi"
     OVERRIDE_ALERT = "override_alert"
     OVERRIDE_WARNING = "override_warning"
+
+
+def parse_mode_payload(payload: Optional[str]) -> Mode | None:
+    if payload is None:
+        return None
+    text = payload.strip().lower()
+    if not text:
+        return None
+    if text in (Mode.PILOT.value, Mode.LOGI.value):
+        return Mode(text)
+    return None
+
+
+def mode_payload_from_switch(enabled: bool) -> str:
+    return Mode.PILOT.value if enabled else Mode.LOGI.value
 
 
 @dataclass(frozen=True)
@@ -107,6 +122,11 @@ class ControlMode:
     def set_pilot_switch(self, enabled: bool, *, timestamp: Optional[datetime] = None) -> ControlMode:
         return self._evolve(pilot_switch=enabled, timestamp=timestamp)
 
+    def set_mode(self, mode: Mode, *, timestamp: Optional[datetime] = None) -> ControlMode:
+        if mode not in (Mode.PILOT, Mode.LOGI):
+            raise ValueError("mode doit être PILOT ou LOGI")
+        return self._evolve(pilot_switch=(mode is Mode.PILOT), timestamp=timestamp)
+
     def set_light_state(self, *, on: bool, timestamp: Optional[datetime] = None) -> ControlMode:
         return self._evolve(light_on=on, timestamp=timestamp)
 
@@ -179,9 +199,7 @@ class ControlMode:
 def _derive_state(pilot_switch: bool, light_on: bool, override: Optional[OverrideAction]) -> Mode:
     if override:
         return override.mode
-    if pilot_switch and light_on:
-        return Mode.PILOT
-    return Mode.OFF
+    return Mode.PILOT if pilot_switch else Mode.LOGI
 
 
 def _clamp_brightness(value: Optional[int], *, fallback: int) -> int:

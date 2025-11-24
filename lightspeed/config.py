@@ -38,12 +38,17 @@ class MqttSettings:
 @dataclass(frozen=True)
 class TopicMap:
     base: str
+    power: str
+    power_state: str
+    mode: str
+    mode_state: str
     color: str
+    color_state: str
+    brightness: str
+    brightness_state: str
     alert: str
-    warning: str
-    auto: str
-    auto_state: str
     status: str
+    lwt: str
 
 
 @dataclass(frozen=True)
@@ -146,16 +151,56 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
         keepalive=int(mqtt_data.get("keepalive", 60)),
     )
 
-    topic_base = _require_str(topics_data, "base", default=DEFAULT_TOPIC_BASE)
-    auto_topic = _derive_topic(topics_data.get("auto"), f"{topic_base}/auto")
+    topic_base = _normalize_base(_require_str(topics_data, "base", default=DEFAULT_TOPIC_BASE))
+    power_suffix, power_topic = _derive_topic_pair(topics_data, "power", "power", topic_base)
+    power_state_suffix, power_state_topic = _derive_topic_pair(
+        topics_data,
+        "power_state",
+        f"{power_suffix}/state",
+        topic_base,
+    )
+    mode_suffix, mode_topic = _derive_topic_pair(topics_data, "mode", "mode", topic_base)
+    mode_state_suffix, mode_state_topic = _derive_topic_pair(
+        topics_data,
+        "mode_state",
+        f"{mode_suffix}/state",
+        topic_base,
+    )
+    color_suffix, color_topic = _derive_topic_pair(topics_data, "color", "color", topic_base)
+    color_state_suffix, color_state_topic = _derive_topic_pair(
+        topics_data,
+        "color_state",
+        f"{color_suffix}/state",
+        topic_base,
+    )
+    brightness_suffix, brightness_topic = _derive_topic_pair(
+        topics_data,
+        "brightness",
+        "brightness",
+        topic_base,
+    )
+    brightness_state_suffix, brightness_state_topic = _derive_topic_pair(
+        topics_data,
+        "brightness_state",
+        f"{brightness_suffix}/state",
+        topic_base,
+    )
+    _, alert_topic = _derive_topic_pair(topics_data, "alert", "alert", topic_base)
+    _, status_topic = _derive_topic_pair(topics_data, "status", "status", topic_base)
+    _, lwt_topic = _derive_topic_pair(topics_data, "lwt", "lwt", topic_base)
     topics = TopicMap(
         base=topic_base,
-        color=_derive_topic(topics_data.get("color"), f"{topic_base}/color"),
-        alert=_derive_topic(topics_data.get("alert"), f"{topic_base}/alert"),
-        warning=_derive_topic(topics_data.get("warning"), f"{topic_base}/warning"),
-        auto=auto_topic,
-        auto_state=_derive_topic(topics_data.get("auto_state"), f"{auto_topic}/state"),
-        status=_derive_topic(topics_data.get("status"), f"{topic_base}/status"),
+        power=power_topic,
+        power_state=power_state_topic,
+        mode=mode_topic,
+        mode_state=mode_state_topic,
+        color=color_topic,
+        color_state=color_state_topic,
+        brightness=brightness_topic,
+        brightness_state=brightness_state_topic,
+        alert=alert_topic,
+        status=status_topic,
+        lwt=lwt_topic,
     )
 
     home_assistant = HomeAssistantSettings(
@@ -190,7 +235,7 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
         health_topic=_require_str(
             observability_data,
             "health_topic",
-            default=f"{topics.base}/health",
+            default=status_topic,
         ),
         log_level=_require_str(observability_data, "log_level", default="INFO"),
     )
@@ -288,9 +333,37 @@ def _optional_str(value: Any) -> Optional[str]:
     return text or None
 
 
-def _derive_topic(value: Optional[str], fallback: str) -> str:
-    text = (value or "").strip()
-    return text or fallback
+def _normalize_base(value: str) -> str:
+    text = value.strip()
+    if not text:
+        raise ConfigError("topics.base ne doit pas être vide")
+    normalized = text.rstrip("/")
+    if not normalized:
+        raise ConfigError("topics.base ne doit pas contenir uniquement des '/'")
+    if " " in normalized:
+        raise ConfigError("topics.base ne doit pas contenir d'espaces")
+    return normalized
+
+
+def _derive_topic_pair(
+    section: Mapping[str, Any],
+    key: str,
+    default_suffix: str,
+    base: str,
+) -> Tuple[str, str]:
+    override = section.get(key)
+    suffix = (_optional_str(override) or default_suffix).strip()
+    if not suffix:
+        raise ConfigError(f"topics.{key} ne doit pas être vide")
+    if suffix.startswith("/"):
+        raise ConfigError(f"topics.{key} doit être relatif à topics.base")
+    normalized_suffix = suffix.strip("/")
+    if normalized_suffix.startswith(f"{base}/"):
+        raise ConfigError(f"topics.{key} ne doit pas répéter topics.base")
+    if " " in normalized_suffix:
+        raise ConfigError(f"topics.{key} ne doit pas contenir d'espaces")
+    topic = f"{base}/{normalized_suffix}"
+    return normalized_suffix, topic
 
 
 def _apply_env_substitution(data: Any, env: Mapping[str, str], *, source: Path) -> Dict[str, Any]:
@@ -332,12 +405,17 @@ def _validate_profile(profile: ConfigProfile) -> None:
 
     for topic in (
         profile.topics.base,
+        profile.topics.power,
+        profile.topics.power_state,
+        profile.topics.mode,
+        profile.topics.mode_state,
         profile.topics.color,
+        profile.topics.color_state,
+        profile.topics.brightness,
+        profile.topics.brightness_state,
         profile.topics.alert,
-        profile.topics.warning,
-        profile.topics.auto,
-        profile.topics.auto_state,
         profile.topics.status,
+        profile.topics.lwt,
     ):
         if not topic or " " in topic:
             raise ConfigError("Les topics MQTT ne doivent pas être vides ni contenir d'espaces")
