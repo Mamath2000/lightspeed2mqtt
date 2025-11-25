@@ -1,17 +1,18 @@
 test:
 # Makefile pour lightspeed2mqtt
 
-.PHONY: help run test
+.PHONY: help run test venv
 
 
 help:
 	@echo "Options disponibles :"
-	@echo "  make run           : lancer l'application (simple-logi.py)"
-	@echo "  make test          : lancer tous les tests (pytest tests)"
+	@echo "  make venv  : créer l'environnement virtuel (.venv) si besoin"
+	@echo "  make run   : lancer l'application (simple-logi.py)"
+	@echo "  make test  : lancer tous les tests (pytest tests)"
 	@echo "  make add_service   : installer le service Windows via nssm"
 	@echo "  make remove_service: désinstaller le service Windows via nssm"
 	@echo "  make stop_service  : arrêter le service Windows via nssm"
-	@echo "  make help          : afficher cette aide"
+	@echo "  make help  : afficher cette aide"
 
 
 # Variables pour le service
@@ -40,10 +41,10 @@ stop_service:
 	@powershell -NoProfile -Command "& '$(NSSM_PATH)' stop $(SERVICE_NAME)"
 	@echo Service arrêté.
 
-run:
-	python simple-logi.py
+run: venv
+	.venv\Scripts\python.exe simple-logi.py
 
-test:
-	pytest tests
+test: venv
+	.venv\Scripts\python.exe -m pytest tests
 
 .DEFAULT_GOAL := help
