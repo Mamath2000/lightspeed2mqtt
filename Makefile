@@ -1,7 +1,7 @@
 test:
 # Makefile pour lightspeed2mqtt
 
-.PHONY: help run test venv install add_service remove_service stop_service
+.PHONY: help run test venv install add_service remove_service stop_service edit_service
 
 
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "  make add_service   : installer le service Windows via nssm"
 	@echo "  make remove_service: désinstaller le service Windows via nssm"
 	@echo "  make stop_service  : arrêter le service Windows via nssm"
+	@echo "  make edit_service  : éditer le service Windows via nssm (GUI)"
 	@echo "  make help          : afficher cette aide"
 
 
@@ -40,6 +41,11 @@ stop_service:
 	@echo Arrêt du service Windows via NSSM...
 	@powershell -NoProfile -Command "& '$(NSSM_PATH)' stop $(SERVICE_NAME)"
 	@echo Service arrêté.
+
+edit_service:
+	@echo Edition du service Windows via NSSM (GUI)...
+	@powershell -NoProfile -Command "& '$(NSSM_PATH)' edit $(SERVICE_NAME)"
+	@echo Edition terminée.
 
 venv:
 	@if not exist .venv\Scripts\python.exe python -m venv .venv

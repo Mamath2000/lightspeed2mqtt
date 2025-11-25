@@ -1,6 +1,23 @@
 # Logitech LED Middleware (Python)
 
-Service unique en Python qui écoute des topics MQTT pour déclencher différentes animations RGB sur vos périphériques Logitech (G Hub / LGS).
+Service Python qui écoute des topics MQTT pour déclencher différentes animations RGB sur vos périphériques Logitech (G Hub / LGS).
+
+## Commandes Makefile
+
+Le Makefile fournit des commandes pour automatiser l’installation, les tests et la gestion du service Windows via NSSM :
+
+| Commande             | Description                                                                 |
+|----------------------|-----------------------------------------------------------------------------|
+| `make install`       | Crée l’environnement virtuel et installe les dépendances Python              |
+| `make run`           | Lance l’application principale (`simple-logi.py`)                           |
+| `make test`          | Exécute tous les tests unitaires avec pytest                                |
+| `make add_service`   | Installe le service Windows via NSSM                                        |
+| `make remove_service`| Désinstalle le service Windows via NSSM                                     |
+| `make stop_service`  | Arrête le service Windows via NSSM                                          |
+| `make edit_service`  | Ouvre l’interface graphique NSSM pour éditer le service Windows             |
+| `make help`          | Affiche l’aide sur les commandes disponibles                                |
+
+> Le chemin de NSSM est paramétrable dans le Makefile (`NSSM_PATH`).
 
 ## Prérequis
 
@@ -20,7 +37,7 @@ python -m pip install -r requirements.txt
 Copy-Item config.example.yaml config.yaml  # puis personnalisez les accès MQTT et la découverte HA
 ```
 
-> Vous pouvez remplacer `python` par `.\.venv\Scripts\python.exe` si vous préférez ne pas activer le venv.
+> Vous pouvez remplacer `python` par `./.venv/Scripts/python.exe` si vous préférez ne pas activer le venv.
 
 ## Configuration (`config.yaml`)
 
@@ -54,7 +71,7 @@ topics:
   base: lightspeed/alerts # Préfixe commun pour toutes les entités HA
 
 home_assistant:
-  device_id: lightspeed-alerts
+  device_id: lightspeed
   device_name: "Logitech Alerts"
   manufacturer: "Logitech"
   model: "LED Middleware"
@@ -85,13 +102,18 @@ palettes:
       duration_ms: 150
     - color: "#000000"
       duration_ms: 150
+  info:
+    max_duration_ms: 200
+    frames:
+    - color: "#FFFFFF"
+      duration_ms: 150
+    - color: "#555555"
+      duration_ms: 150
 
 logitech:
-  dll_path: "" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
-  profile_backup: "backup.json" # Fichier où stocker l'état initial
+  dll_path: "lib\\LogitechLed.dll" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
 
 observability:
-  health_topic: "" # Laisser vide pour réutiliser <topics.status>
   log_level: "INFO"
 ```
 <!-- config-example:end -->
@@ -108,18 +130,7 @@ observability:
 | `mqtt.client_id` | Nom unique du client MQTT | `lightspeed-led` |
 | `mqtt.keepalive` | Intervalle keepalive en secondes | `60` |
 | `topics.base` | Préfixe commun pour tous les topics | `lightspeed/alerts` |
-| `topics.power` | Suffixe ON/OFF retenu pour l'ownership | `<base>/power` |
-| `topics.power_state` | Miroir retained confirmant le dernier payload ON/OFF | `<topics.power>/state` |
-| `topics.mode` | Commande retenue pilot/logi pour prendre la main | `<base>/mode` |
-| `topics.mode_state` | Miroir retained pour refléter le mode actif | `<topics.mode>/state` |
-| `topics.color` | Commandes RGB (#RRGGBB, R,G,B ou JSON {r,g,b}) | `<base>/color` |
-| `topics.color_state` | Miroir retained de la dernière couleur acceptée | `<topics.color>/state` |
-| `topics.brightness` | Commande 0-100 (implique power=ON) | `<base>/brightness` |
-| `topics.brightness_state` | Miroir retained de la luminosité | `<topics.brightness>/state` |
-| `topics.alert` | Sujet JSON pour alert/warning/info (non retained) | `<base>/alert` |
-| `topics.status` | JSON retained online/offline + attributs | `<base>/status` |
-| `topics.lwt` | Disponibilité MQTT publish/Last Will online/offline | `<base>/lwt` |
-| `home_assistant.device_id` | Identifiant unique Home Assistant | `lightspeed-alerts` |
+| `home_assistant.device_id` | Identifiant unique Home Assistant | `lightspeed` |
 | `home_assistant.device_name` | Nom présenté dans HA | `Logitech Alerts` |
 | `home_assistant.manufacturer` | Fabricant affiché | `Logitech` |
 | `home_assistant.model` | Modèle affiché | `LED Middleware` |
@@ -130,39 +141,36 @@ observability:
 | `effects.override_duration_seconds` | Durée des overrides Alert/Warning (1-300s) | `10` |
 | `palettes.alert.max_duration_ms` | Durée max (Principe IV) | `500` |
 | `palettes.warning.max_duration_ms` | Durée max warning | `350` |
-| `logitech.dll_path` | Chemin personnalisé vers LogitechLed.dll |  |
-| `logitech.profile_backup` | Sauvegarde du profil initial | `backup.json` |
-| `observability.health_topic` | Topic JSON de santé retenu | `<topics.status>` |
+| `palettes.info.max_duration_ms` | Durée max info | `200` |
+| `logitech.dll_path` | Chemin personnalisé vers LogitechLed.dll | `lib\\LogitechLed.dll` |
 | `observability.log_level` | Niveau de logs | `INFO` |
 <!-- config-table:end -->
 
-### Catalogue des topics canoniques
+### Catalogue des topics MQTT
 
-Tous les sujets MQTT sont dérivés dynamiquement de `topics.base`. Les commandes Home Assistant publient toujours sur les suffixes suivants, et le middleware republie les confirmations retenues afin de garder les dashboards synchronisés :
+Tous les topics sont dérivés de `topics.base` (ex : `lightspeed/alerts`).
 
-| Sujet | Retained | Direction | Payload | Description |
-|-------|----------|-----------|---------|-------------|
-| `<base>/power` | Oui | HA ➜ Service | `ON` / `OFF` | Transfert d'ownership : `ON` confie la main au middleware, `OFF` rend la main Logitech immédiatement. |
-| `<base>/power/state` | Oui | Service ➜ HA | `ON` / `OFF` | Miroir retenu pour que HA voie l'état même après redémarrage. |
-| `<base>/mode` | Oui | HA ⇄ Service | `pilot` / `logi` | Canal unique de commande + état. `pilot` force l'intégration, `logi` coupe toutes les animations et restaure LogitechLed.dll. |
-| `<base>/mode/state` | Oui | Service ➜ HA | `pilot` / `logi` | Confirmation retenue, utile si HA rate la commande initiale. |
-| `<base>/color` | Oui | HA ➜ Service | `#RRGGBB`, `R,G,B` ou JSON `{"r":..,"g":..,"b":..}` | Fixe la couleur RGB. Implémentation applique automatiquement la dernière luminosité connue. |
-| `<base>/color/state` | Oui | Service ➜ HA | JSON `{"state":"ON","color":{...},"brightness":<0-255>}` | Permet à HA de restaurer l'état visuel après reboot broker/client. |
-| `<base>/brightness` | Oui | HA ➜ Service | `0-100` ou JSON `{ "brightness": int }` | Ajuste la luminosité tout en laissant la couleur intacte. Force `power=ON`. |
-| `<base>/brightness/state` | Oui | Service ➜ HA | JSON `{ "brightness": 0-100 }` | Confirmation retenue destinée aux sliders HA. |
-| `<base>/alert` | Non | HA ➜ Service | JSON `{ "type": "alert"|"warning"|"info", "duration"?: 1-300 }` | Demarre un override. `info` est traité comme `alert`. Valeurs hors bornes sont rejetées et loguées. |
-| `<base>/status` | Oui | Service ➜ HA | JSON `{ "state": "online"|"offline", "mode":..., ... }` | Télémétrie détaillée (mode, couleur, erreurs, override actif). |
-| `<base>/lwt` | Oui | Service ⇄ Broker | `online` / `offline` | Disponibilité. Le client publie `online` à la connexion et configure la Last Will `offline`. |
+| Sujet                | Retained | Direction      | Payload                                         | Description                                      |
+|----------------------|----------|---------------|-------------------------------------------------|--------------------------------------------------|
+| `<base>/status`      | Oui      | Service ➜ HA  | JSON `{ "state": "on"|"off", "rgb": [r,g,b], "brightness": 0-255, "mode": "pilot"|"auto" }` | État complet de la lumière et du mode            |
+| `<base>/switch`      | Oui      | HA ➜ Service  | `on` / `off`                                    | Allume/éteint la lumière (pilot uniquement)      |
+| `<base>/rgb/set`     | Oui      | HA ➜ Service  | `#RRGGBB`, `R,G,B` ou JSON                      | Change la couleur RGB (pilot uniquement)         |
+| `<base>/brightness/set` | Oui   | HA ➜ Service  | `0-255` ou JSON                                 | Change la luminosité (pilot uniquement)          |
+| `<base>/mode/set`    | Oui      | HA ➜ Service  | `pilot` / `auto`                                | Change le mode de contrôle                       |
+| `<base>/alert`       | Non      | HA ➜ Service  | (vide ou JSON)                                  | Déclenche un effet d’alerte (rouge)             |
+| `<base>/warn`        | Non      | HA ➜ Service  | (vide ou JSON)                                  | Déclenche un effet warning (orange)             |
+| `<base>/info`        | Non      | HA ➜ Service  | (vide ou JSON)                                  | Déclenche un effet info (blanc/gris)            |
+| `<base>/lwt`         | Oui      | Service ⇄ Broker | `online` / `offline`                         | Disponibilité MQTT (Last Will)                   |
 
-> 💡 Les topics suffixes (`power`, `mode`, etc.) **doivent** rester relatifs ; la dérivation `<base>/suffix` évite tout décalage quand vous changez `topics.base`.
+> Les topics `/switch`, `/rgb/set`, `/brightness/set`, `/mode/set` sont à utiliser pour piloter l’état. Le topic `/status` est retained et permet à Home Assistant de re-synchroniser l’état après redémarrage.
 
-### Workflow pilot/logi
+### Workflow pilot/auto
 
-1. **Prendre la main** : publiez le payload retenu `pilot` sur `<base>/mode` (ou utilisez le bouton HA correspondant). Le middleware s'assure que `power` vaut `ON`, rejoue la dernière couleur/brightness retenue et publie `pilot` sur `<base>/mode/state`.
-2. **Envoyer des commandes** : tant que `pilot` est actif, envoyez des couleurs (`<base>/color`), de la luminosité (`<base>/brightness`) ou déclenchez un override (`<base>/alert`). Chaque commande est accusée via les topics `.../state` et `status`.
-3. **Rendre la main Logitech** : publiez `logi` sur `<base>/mode` ou `OFF` sur `<base>/power`. Le service arrête les overrides actifs, restaure l'éclairage stocké via LogitechLed.dll, met à jour `mode_state`, `power_state`, `status` et laisse HA voir `logi`/`OFF` comme confirmation.
+1. **Prendre la main (pilot)** : publiez `pilot` sur `<base>/mode/set`. Le middleware applique la dernière couleur/brightness et passe en mode pilot.
+2. **Envoyer des commandes** : tant que le mode pilot est actif, envoyez des couleurs (`<base>/rgb/set`), de la luminosité (`<base>/brightness/set`) ou déclenchez un effet (`<base>/alert`, etc.).
+3. **Rendre la main à Logitech (auto)** : publiez `auto` sur `<base>/mode/set`. Le service arrête les effets actifs, restaure l’éclairage Logitech, et passe en mode auto.
 
-Grâce au retained + Last Will, Home Assistant peut redémarrer sans perdre l'information d'ownership et vos automatisations savent quand l'intégration est réellement disponible (`<base>/lwt`).
+Le topic `<base>/status` est retained et permet à Home Assistant de retrouver l’état après redémarrage. `<base>/lwt` indique la disponibilité du service.
 
 ## Lancer le service MQTT
 
@@ -170,46 +178,33 @@ Grâce au retained + Last Will, Home Assistant peut redémarrer sans perdre l'in
 python simple-logi.py serve --config config.yaml
 ```
 
-Le service :
-
-- applique `lighting.default_color` dès que le contrôleur est prêt ;
-- s'abonne aux sujets dérivés de `topics.base` décrits ci-dessus ;
-- restaure Logitech instantanément lorsque vous publiez `OFF` sur `<base>/power` ou `logi` sur `<base>/mode` ;
-- republie toutes les confirmations (`/state`, `status`, `lwt`) avec `retain` pour que Home Assistant retrouve l'état après redémarrage ;
+Le service :
+- applique `lighting.default_color` dès que le contrôleur est prêt ;
+- s'abonne aux sujets dérivés de `topics.base` décrits ci-dessus ;
+- restaure Logitech instantanément lorsque vous publiez `auto` sur `<base>/mode/set` ;
+- republie toutes les confirmations (`/status`, `lwt`) avec `retain` pour que Home Assistant retrouve l'état après redémarrage ;
 - rejette toute commande JSON invalide (alertes, couleurs, brightness) et consigne la raison dans les logs.
-
-Envoyez simplement vos payloads sur les sujets canoniques (QoS 0 ou 1), la boucle événementielle applique les changements en moins de 100 ms.
 
 ## Utilisation en ligne de commande (tests rapides)
 
-Les sous-commandes offrent les mêmes effets que les topics MQTT :
+Les sous-commandes offrent les mêmes effets que les topics MQTT :
 
 ```powershell
 # Couleur ponctuelle (hex ou R,G,B). --duration permet de rendre la main automatiquement.
 python simple-logi.py color '#FF3300' --duration 5 --config config.yaml
 
-# Pattern alerte jusqu'à Ctrl+C (équivalent à publier {"type":"alert"} sur <base>/alert)
+# Pattern alerte jusqu'à Ctrl+C (équivalent à publier sur <base>/alert)
 python simple-logi.py alert --config config.yaml
 
-# Pattern warning pendant 10 secondes (équivalent à {"type":"warning","duration":10})
+# Pattern warning pendant 10 secondes (équivalent à <base>/warn)
 python simple-logi.py warning --duration 10 --config config.yaml
 
-# Rendre la main immédiatement (publie `logi` sur <base>/mode)
+# Rendre la main immédiatement (publie `auto` sur <base>/mode/set)
 python simple-logi.py auto --config config.yaml
 ```
 
 ## Notes importantes
 
 - `LogitechLed.dll` doit être disponible, sinon le SDK ne peut pas démarrer.
-- Le service sauvegarde l'éclairage actuel au démarrage et le restaure lorsque vous publiez `logi` sur `<base>/mode`, `OFF` sur `<base>/power`, ou quand le programme se termine.
+- Le service sauvegarde l'éclairage actuel au démarrage et le restaure lorsque vous publiez `auto` sur `<base>/mode/set` ou quand le programme se termine.
 - Pour un usage 24/7, exécutez le script comme service Windows ou via le planificateur de tâches avec le venv activé.
-
-## Migration depuis `.env`
-
-1. Sauvegardez votre ancien `.env`, puis copiez `config.example.yaml` vers `config.yaml`.
-2. Mappez chaque variable (`MQTT_HOST`, `MQTT_PORT`, `TOPIC_ALERT`, `DEFAULT_COLOR`, etc.) vers la section YAML équivalente (`mqtt.host`, `topics.alert`, `lighting.default_color`).
-3. Pour les secrets, conservez `${MQTT_PASSWORD}` dans YAML et définissez la variable d'environnement côté système.
-4. Exécutez `python simple-logi.py validate-config --config config.yaml`, corrigez les erreurs éventuelles, puis démarrez `serve`.
-5. Supprimez ou ignorez l'ancien `.env` dès que la migration est terminée afin d'éviter les divergences.
-
-Consultez `docs/validation/config-lint.md` pour un pas-à-pas détaillé (logs attendus, commandes MQTT de contrôle, etc.).
