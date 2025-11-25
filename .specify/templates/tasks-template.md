@@ -17,6 +17,7 @@ description: "Task list template for feature implementation"
 - **[P]**: Can run in parallel (different files, no dependencies)
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
 - Include exact file paths in descriptions
+- When tasks touch MQTT logic, call out which canonical topic (`power`, `mode`, `color`, `brightness`, `alert`) and payload rules apply so reviewers can trace compliance with the constitution.
 
 ## Path Conventions
 

@@ -1,0 +1,60 @@
+# Exemple de configuration Logitech Alerts
+# Copiez ce fichier vers config.yaml puis remplacez les valeurs ci-dessous.
+# Toutes les clés doivent rester présentes pour que la validation réussisse.
+
+mqtt:
+  host: localhost # Hôte / IP du broker
+  port: 1883 # Port TCP (1883 sans TLS)
+  username: "" # Identifiant optionnel
+  password: "${MQTT_PASSWORD}" # Secret optionnel (peut référencer une variable d'environnement)
+  client_id: lightspeed-led # Nom du client MQTT
+  keepalive: 60 # Intervalle keepalive en secondes
+
+topics:
+  base: lightspeed/alerts # Préfixe commun pour toutes les entités HA
+
+home_assistant:
+  device_id: lightspeed
+  device_name: "Logitech Alerts"
+  manufacturer: "Logitech"
+  model: "LED Middleware"
+  area: "" # Nom d'aire HA optionnel
+
+lighting:
+  default_color: "#00FF80"
+  auto_restore: true # Restaure le profil Logitech lors d'un `auto`
+  lock_file: "lightspeed.lock" # Verrou pour éviter les accès concurrents
+
+effects:
+  override_duration_seconds: 10 # Durée Alert/Warning en secondes (entre 1 et 300)
+
+palettes:
+  alert:
+    max_duration_ms: 500 # Ne jamais dépasser 500 ms (Principe IV)
+    frames:
+    - color: "#FF0000"
+      duration_ms: 150
+    - color: "#FFFFFF"
+      duration_ms: 150
+    - color: "#000000"
+      duration_ms: 150
+  warning:
+    max_duration_ms: 350
+    frames:
+    - color: "#FF8C00"
+      duration_ms: 150
+    - color: "#000000"
+      duration_ms: 150
+  info:
+    max_duration_ms: 200
+    frames:
+    - color: "#FFFFFF"
+      duration_ms: 150
+    - color: "#555555"
+      duration_ms: 150
+
+logitech:
+  dll_path: "lib\\LogitechLed.dll" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
+
+observability:
+  log_level: "INFO"

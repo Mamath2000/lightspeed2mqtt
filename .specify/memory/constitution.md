@@ -1,14 +1,14 @@
 <!--
 Sync Impact Report
-- Version change: 0.0.0 -> 1.0.0
-- Modified principles: (new) I. Momentary Control, II. Explicit MQTT Contracts, III. Python-Only Surface, IV. Safe Alert Patterns, V. Observable Operations
-- Added sections: Architecture Constraints, Workflow & Quality Gates
+- Version change: 1.1.0 -> 1.2.0
+- Modified principles: Explicit MQTT Contracts (now enumerates power, mode, color, brightness, alert topics with payload rules)
+- Added sections: MQTT Topic Catalog (under Architecture Constraints)
 - Removed sections: none
 - Templates requiring updates:
-	- ✅ .specify/templates/plan-template.md (constitution check references remain valid)
-	- ✅ .specify/templates/spec-template.md (no node-specific guidance present)
-	- ✅ .specify/templates/tasks-template.md (task grouping already matches principle V requirements)
-- Follow-up TODOs: none
+  - ✅ .specify/templates/spec-template.md (guidance notes now reference canonical topics)
+  - ✅ .specify/templates/plan-template.md (Constitution Check reminder references canonical topics)
+  - ✅ .specify/templates/tasks-template.md (task format section now calls out canonical topic compliance)
+- Follow-up TODOs: TODO(update_existing_specs): Align existing specs/plans referencing `auto`, `warning`, or separate alert topics with the new catalog
 -->
 
 # Lightspeed Alerts Constitution
@@ -21,7 +21,15 @@ The middleware may take over Logitech lighting only to render an alert and MUST 
 
 ### II. Explicit MQTT Contracts
 
-All capabilities are triggered via MQTT topics (`color`, `alert`, `warning`, `auto`). Payload formats are limited to `#RRGGBB`, `R,G,B`, or `{ "r":int, "g":int, "b":int }`. Specifications, plans, and code reviews must reject changes that introduce additional schemas or undocumented topics.
+All capabilities live under the configured `topics.base` and MUST use the canonical topics + payloads below. Specifications, plans, and reviews must reject changes that invent extra topics or payload shapes without a new constitutional amendment.
+
+1. **`topics.power`** – Controls whether the integration or Logitech software drives the LEDs. Payloads are retained strings `ON` or `OFF`. `ON` hands control to the integration; `OFF` restores Logitech immediately.
+2. **`topics.mode`** – Selects the operating mode. Payloads are retained strings `pilot` (integration manages lighting) or `logi` (Logitech manages lighting). This topic is independent from `topics.power` so ownership can be asserted even while the light is off.
+3. **`topics.color`** – Sets RGB values for Pilot mode. Payload formats remain `#RRGGBB`, `R,G,B`, or `{ "r":int, "g":int, "b":int }` (0–255). Publishing here implies `topics.power = ON` and requires Pilot mode.
+4. **`topics.brightness`** – Adjusts intensity without resending color. Payloads are integers 0–100 (as strings or JSON `{ "brightness": int }`). Values outside the range must be rejected.
+5. **`topics.event`** – Requests temporary overrides. Payloads are JSON objects containing at least `{ "type": "alert" | "warning" | "info" }` and optionally `{ "duration": int }` with 1–300 second limits. The previous `warning`-specific topic is removed.
+
+No other payloads (e.g., booleans, custom JSON) are permitted on these topics, and reusing a topic for multiple schemas is prohibited.
 
 ### III. Python-Only Surface
 
@@ -38,8 +46,9 @@ Every message handling path logs topic, parsed intent, and outcome (success, val
 ## Architecture Constraints
 
 - **Hardware & SDK**: LogitechLed.dll must reside next to `simple-logi.py` or be referenced via `LOGI_LED_DLL`. The service saves lighting state once per session and never assumes exclusive device ownership.
-- **Runtime Layout**: Single Python entrypoint supporting `serve`, `color`, `alert`, `warning`, `auto` sub-commands. MQTT handling runs in one thread, while visual patterns run on background workers guarded by stop events.
-- **Configuration**: `.env` defines broker host/port, credentials, topics, and `DEFAULT_COLOR`. Missing required values stops startup with a descriptive error.
+- **Runtime Layout**: Single Python entrypoint supporting `serve`, `color`, `alert`, `mode`, `power`, and `brightness` sub-commands. MQTT handling runs in one thread, while visual patterns run on background workers guarded by stop events.
+- **MQTT Topic Catalog**: Implementations MUST declare all five canonical topics (`power`, `mode`, `color`, `brightness`, `alert`) inside `config.yaml` and surface retained state for `power`, `mode`, and alert availability. Discovery payloads in `lightspeed/ha_contracts.py` must map Home Assistant entities directly to these topics.
+- **Configuration**: `config.yaml` (or a CLI-provided YAML path) defines MQTT broker settings, discovery metadata, topic prefixes, palettes, and Logitech DLL overrides. A tracked `config.example.yaml` serves as the canonical template, and startup HALTs if required keys are missing or malformed.
 - **Performance Envelope**: The service must process MQTT messages within 100 ms of receipt and keep CPU usage negligible by sleeping between pattern frames.
 
 ## Workflow & Quality Gates
@@ -47,7 +56,7 @@ Every message handling path logs topic, parsed intent, and outcome (success, val
 - **Spec Kit Order**: Always run `/speckit.constitution` → `/speckit.specify` → `/speckit.plan` → `/speckit.tasks` → `/speckit.implement`. Skip steps only when documented as out-of-scope experiments.
 - **Constitution Check Items** (must appear in every plan):
   1. Does the change preserve Principle I (save/restore path)?
-  2. Are MQTT payloads unchanged or clearly versioned per Principle II?
+  2. Does it keep every interaction within the canonical `power`, `mode`, `color`, `brightness`, and `alert` topics and their approved payloads?
   3. Does the solution rely solely on Python dependencies per Principle III?
   4. Are alert intervals and palettes within Principle IV bounds?
   5. Where are logs/emitted metrics recorded to satisfy Principle V?
@@ -61,4 +70,4 @@ Every message handling path logs topic, parsed intent, and outcome (success, val
 - **Amendments**: Proposed via `/speckit.constitution` with reasoning, impact assessment, and template sync notes. Approval requires consensus between stakeholders responsible for MQTT infrastructure and hardware usage.
 - **Compliance**: `/speckit.plan` and `/speckit.tasks` outputs must explicitly document how each user story honors these principles before `/speckit.implement` begins.
 
-**Version**: 1.0.0 | **Ratified**: 2025-11-23 | **Last Amended**: 2025-11-23
+//**Version**: 1.2.0 | **Ratified**: 2025-11-23 | **Last Amended**: 2025-11-24
