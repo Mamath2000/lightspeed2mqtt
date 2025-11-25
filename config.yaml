@@ -54,7 +54,7 @@ palettes:
       duration_ms: 150
 
 logitech:
-  dll_path: "C:\\Users\\Mamat\\OneDrive\\Documents\\lightspeed2mqtt\\lib\\LogitechLed.dll" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
+  dll_path: "lib\\LogitechLed.dll" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
 
 observability:
   log_level: "INFO"

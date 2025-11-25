@@ -14,7 +14,7 @@ topics:
   base: lightspeed/alerts # Préfixe commun pour toutes les entités HA
 
 home_assistant:
-  device_id: lightspeed-alerts
+  device_id: lightspeed
   device_name: "Logitech Alerts"
   manufacturer: "Logitech"
   model: "LED Middleware"
@@ -32,30 +32,29 @@ palettes:
   alert:
     max_duration_ms: 500 # Ne jamais dépasser 500 ms (Principe IV)
     frames:
-      - color: "#FF0000"
-        duration_ms: 150
-      - color: "#FFFFFF"
-        duration_ms: 150
-      - color: "#000000"
-        duration_ms: 150
+    - color: "#FF0000"
+      duration_ms: 150
+    - color: "#FFFFFF"
+      duration_ms: 150
+    - color: "#000000"
+      duration_ms: 150
   warning:
     max_duration_ms: 350
     frames:
-      - color: "#FF8C00"
-        duration_ms: 150
-      - color: "#000000"
-        duration_ms: 150
+    - color: "#FF8C00"
+      duration_ms: 150
+    - color: "#000000"
+      duration_ms: 150
   info:
     max_duration_ms: 200
     frames:
-      - color: "#FFFFFF"
-        duration_ms: 150
-      - color: "#555555"
-        duration_ms: 150
+    - color: "#FFFFFF"
+      duration_ms: 150
+    - color: "#555555"
+      duration_ms: 150
 
 logitech:
-  dll_path: "" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
-  profile_backup: "backup.json" # Fichier où stocker l'état initial
+  dll_path: "lib\\LogitechLed.dll" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
 
 observability:
   log_level: "INFO"

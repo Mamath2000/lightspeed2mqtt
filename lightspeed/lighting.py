@@ -76,7 +76,14 @@ class LightingController:
         self.stop_event = threading.Event()
         self.initialized = False
         self.released = False
-        self.dll_path = Path(dll_path).expanduser() if dll_path else None
+        # Si dll_path est relatif, le rendre absolu par rapport au cwd
+        if dll_path:
+            dll_path = os.path.expanduser(dll_path)
+            self.dll_path = Path(dll_path)
+            if not self.dll_path.is_absolute():
+                self.dll_path = (Path.cwd() / self.dll_path).resolve()
+        else:
+            self.dll_path = None
         self.lock_file = Path(lock_file).expanduser() if lock_file else None
 
     def _acquire_lock(self) -> None:
