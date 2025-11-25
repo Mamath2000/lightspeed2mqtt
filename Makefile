@@ -48,10 +48,10 @@ install: venv
 	.venv\Scripts\python.exe -m pip install --upgrade pip
 	.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-run: install
+run: venv
 	.venv\Scripts\python.exe simple-logi.py
 
-test: install
+test: venv
 	.venv\Scripts\python.exe -m pytest tests
 
 .DEFAULT_GOAL := help
