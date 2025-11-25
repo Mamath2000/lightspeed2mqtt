@@ -42,8 +42,10 @@ class TopicMap:
     command_topic: str
     rgb_command_topic: str
     brightness_command_topic: str
-    effect_command_topic: str
-    effect_state_topic: str
+    mode_command_topic: str
+    alert_command_topic: str
+    warn_command_topic: str
+    info_command_topic: str
     lwt: str
 
 
@@ -155,8 +157,10 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
         command_topic=f"{topic_base}/switch",
         rgb_command_topic=f"{topic_base}/rgb/set",
         brightness_command_topic=f"{topic_base}/brightness/set",
-        effect_command_topic=f"{topic_base}/effect/set",
-        effect_state_topic=f"{topic_base}/status",
+        mode_command_topic=f"{topic_base}/mode/set",
+        alert_command_topic=f"{topic_base}/alert",
+        warn_command_topic=f"{topic_base}/warn",
+        info_command_topic=f"{topic_base}/info",
         lwt=f"{topic_base}/lwt",
     )
 
@@ -366,8 +370,10 @@ def _validate_profile(profile: ConfigProfile) -> None:
         profile.topics.command_topic,
         profile.topics.rgb_command_topic,
         profile.topics.brightness_command_topic,
-        profile.topics.effect_command_topic,
-        profile.topics.effect_state_topic,
+        profile.topics.mode_command_topic,
+        profile.topics.alert_command_topic,
+        profile.topics.warn_command_topic,
+        profile.topics.info_command_topic,
         profile.topics.lwt,
     ):
         if not topic or " " in topic:

@@ -129,20 +129,13 @@ def run_cli_auto(profile: ConfigProfile) -> None:
         controller.shutdown()
 
 
-def _pilot_state_topic(profile: ConfigProfile) -> str:
-    legacy = getattr(profile.topics, "auto_state", None)
-    if legacy:
-        return legacy
-    return profile.topics.mode_state
-
-
-def _read_pilot_switch_state(
+def _read_retained_state(
     profile: ConfigProfile,
     *,
     logger: logging.Logger,
     timeout: float = 2.0,
-) -> Optional[bool]:
-    """Return retained pilot switch state if broker exposes it, else None."""
+) -> Optional[dict]:
+    """Lit l'état retained du state_topic si disponible."""
 
     event = threading.Event()
     state: dict[str, Optional[str]] = {"value": None}
@@ -156,13 +149,16 @@ def _read_pilot_switch_state(
 
     def _on_connect(mqtt_client, _userdata, _flags, rc):
         if rc != 0:
-            logger.warning("Connexion bootstrap pilot échouée", extra={"code": rc})
+            logger.warning("Connexion bootstrap échouée", extra={"code": rc})
             event.set()
             return
-        mqtt_client.subscribe(_pilot_state_topic(profile), qos=1)
+        mqtt_client.subscribe(profile.topics.state_topic, qos=1)
 
     def _on_message(_mqtt_client, _userdata, message):
-        state["value"] = message.payload.decode("utf-8", errors="ignore").strip().upper()
+        try:
+            state["value"] = message.payload.decode("utf-8", errors="ignore").strip()
+        except Exception:
+            pass
         event.set()
 
     client.on_connect = _on_connect
@@ -173,15 +169,18 @@ def _read_pilot_switch_state(
         client.loop_start()
         event.wait(timeout)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Lecture pilot switch impossible", extra={"error": str(exc)})
+        logger.warning("Lecture état retained impossible", extra={"error": str(exc)})
         return None
     finally:
         client.loop_stop()
         client.disconnect()
 
-    value = state["value"]
-    if value in {"ON", "OFF"}:
-        return value == "ON"
+    if state["value"]:
+        try:
+            import json
+            return json.loads(state["value"])
+        except (json.JSONDecodeError, ValueError):
+            pass
     return None
 
 
@@ -254,15 +253,15 @@ def main() -> None:
             profile,
             validated_at=validated_at,
         )
-        bootstrap_state = _read_pilot_switch_state(profile, logger=logger)
-        if bootstrap_state is not None:
-            service.bootstrap_pilot_switch(bootstrap_state)
-            logger.info(
-                "État pilot initialisé",
-                extra={"pilot_switch": "ON" if bootstrap_state else "OFF"},
-            )
+        
+        # Lire l'état retained pour restaurer l'état précédent
+        retained_state = _read_retained_state(profile, logger=logger)
+        if retained_state:
+            service.bootstrap_from_retained(retained_state)
+            logger.info("État restauré depuis MQTT", extra={"state": retained_state})
         else:
-            logger.info("Aucun état pilot retenu détecté", extra={"topic": _pilot_state_topic(profile)})
+            logger.info("Aucun état retained trouvé, utilisation des valeurs par défaut")
+        
         try:
             service.start()
             service.loop_forever()

@@ -192,8 +192,11 @@ class LightingController:
         self.stop_pattern()
         with self.lock:
             logi_led.logi_led_restore_lighting()
+            # Force la restauration en désactivant temporairement notre contrôle
+            logi_led.logi_led_shutdown()
         self._release_lock()
         self.released = True
+        self.initialized = False
 
 
 def restore_logitech_control(controller: LightingController) -> None:
