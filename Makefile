@@ -1,18 +1,15 @@
 test:
 # Makefile pour lightspeed2mqtt
 
-.PHONY: help run test venv
+.PHONY: help run test venv install
 
 
 help:
 	@echo "Options disponibles :"
-	@echo "  make venv  : créer l'environnement virtuel (.venv) si besoin"
-	@echo "  make run   : lancer l'application (simple-logi.py)"
-	@echo "  make test  : lancer tous les tests (pytest tests)"
-	@echo "  make add_service   : installer le service Windows via nssm"
-	@echo "  make remove_service: désinstaller le service Windows via nssm"
-	@echo "  make stop_service  : arrêter le service Windows via nssm"
-	@echo "  make help  : afficher cette aide"
+	@echo "  make install: créer le venv et installer les requirements"
+	@echo "  make run    : lancer l'application (simple-logi.py)"
+	@echo "  make test   : lancer tous les tests (pytest tests)"
+	@echo "  make help   : afficher cette aide"
 
 
 # Variables pour le service
@@ -41,10 +38,17 @@ stop_service:
 	@powershell -NoProfile -Command "& '$(NSSM_PATH)' stop $(SERVICE_NAME)"
 	@echo Service arrêté.
 
-run: venv
+venv:
+	@if not exist .venv\Scripts\python.exe python -m venv .venv
+
+install: venv
+	.venv\Scripts\python.exe -m pip install --upgrade pip
+	.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+run: install
 	.venv\Scripts\python.exe simple-logi.py
 
-test: venv
+test: install
 	.venv\Scripts\python.exe -m pytest tests
 
 .DEFAULT_GOAL := help
