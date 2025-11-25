@@ -11,14 +11,27 @@ import time
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
+
 from lightspeed.config import ConfigProfile, PaletteDefinition
 
-try:
-    from logipy import logi_led
-except ImportError as exc:  # pragma: no cover - logipy is required at runtime
-    raise ImportError(
-        "Le module 'logipy' est requis. Installez-le avec: pip install logipy"
-    ) from exc
+# Charger explicitement la DLL LogitechLed depuis lib/ avant d'importer logipy
+import importlib
+_dll_name = "LogitechLed.dll"
+_dll_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'lib', _dll_name))
+_dll_handle = None
+if os.path.exists(_dll_path):
+    try:
+        _dll_handle = ctypes.WinDLL(_dll_path)
+    except Exception as e:
+        sys.stderr.write(f"[ERREUR] Impossible de charger la DLL LogitechLed depuis {_dll_path}: {e}\n")
+        sys.exit(1)
+else:
+    sys.stderr.write(f"[ERREUR] DLL LogitechLed non trouvée à l'emplacement attendu : {_dll_path}\n")
+    sys.exit(1)
+
+from logipy import logi_led
+# Injecter le handle pour forcer logipy à utiliser la bonne DLL
+logi_led.led_dll = _dll_handle
 
 RGB = Tuple[int, int, int]
 PatternFrame = Tuple[RGB, float]
