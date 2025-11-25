@@ -202,7 +202,6 @@ class MqttLightingService:
             "state": "on" if self.control.light_on else "off",
             "rgb": list(self.control.last_command_color),
             "brightness": self.control.last_brightness,
-            "effect": self.control.override.kind if self.control.override else "None",
             "mode": "pilot" if self.control.pilot_switch else "auto",
         }, separators=(",", ":"))
         

@@ -65,8 +65,9 @@ def test_load_config_happy_path(tmp_path):
     assert config.topics.command_topic == "foo/bar/switch"
     assert config.topics.rgb_command_topic == "foo/bar/rgb/set"
     assert config.topics.brightness_command_topic == "foo/bar/brightness/set"
-    assert config.topics.effect_command_topic == "foo/bar/effect/set"
-    assert config.topics.effect_state_topic == "foo/bar/status"
+    assert config.topics.alert_command_topic == "foo/bar/alert"
+    assert config.topics.warn_command_topic == "foo/bar/warn"
+    assert config.topics.info_command_topic == "foo/bar/info"
     assert config.lighting.default_color == (51, 102, 153)
     assert config.effects.override_duration_seconds == 10
     assert config.palettes.alert.max_duration_ms == 450
@@ -294,8 +295,9 @@ def test_topics_allow_custom_suffixes(tmp_path):
     assert profile.topics.command_topic == "foo/bar/switch"
     assert profile.topics.rgb_command_topic == "foo/bar/rgb/set"
     assert profile.topics.brightness_command_topic == "foo/bar/brightness/set"
-    assert profile.topics.effect_command_topic == "foo/bar/effect/set"
-    assert profile.topics.effect_state_topic == "foo/bar/status"
+    assert profile.topics.alert_command_topic == "foo/bar/alert"
+    assert profile.topics.warn_command_topic == "foo/bar/warn"
+    assert profile.topics.info_command_topic == "foo/bar/info"
 
 
 def test_health_topic_defaults_to_status(tmp_path):

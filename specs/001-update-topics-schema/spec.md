@@ -1,121 +1,177 @@
-# Feature Specification: Base-Relative Topic Schema
+# Feature Specification: Simplified MQTT Topic Schema
 
 **Feature Branch**: `001-update-topics-schema`  
 **Created**: 2025-11-24  
-**Status**: Draft  
-**Input**: "la gestion des topic ne me va pas ... ajouter un topic {base}/lwt avec l'état de l'application online/offline."
+**Updated**: 2025-11-25  
+**Status**: Implemented  
+**Input**: "C'est trop compliqué et l'utilisation de spec.kit n'est pas concluent. Dans la config je ne veux que le base topic."
 
-## User Scenarios & Testing *(mandatory)*
+## User Scenarios & Testing
 
-<!--
-  IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
-  Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
-  you should still have a viable MVP (Minimum Viable Product) that delivers value.
-  
-  Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
-  Think of each story as a standalone slice of functionality that can be:
-  - Developed independently
-  - Tested independently
-  - Deployed independently
-  - Demonstrated to users independently
--->
+### User Story 1 - Base Topic Only (Priority: P1)
 
-### User Story 1 - Base-Derived Topics (Priority: P1)
+As an operator, I want to configure only `topics.base` in `config.yaml`, with all other topics derived as fixed suffixes (`/status`, `/switch`, `/rgb/set`, `/brightness/set`, `/mode/set`, `/alert`, `/warn`, `/info`, `/lwt`), so that configuration is simple and consistent.
 
-As an operator, I want every canonical MQTT topic (`power`, `mode`, `color`, `brightness`, `alert`, `status`, `lwt`) in `config.yaml` to be defined as a suffix relative to `topics.base`, so that changing the base automatically updates the entire contract and keeps deployments consistent.
+**Why this priority**: Eliminates complex topic configuration and ensures consistency across all deployments.
 
-**Why this priority**: Eliminates mismatched topic names (current pain point) and guarantees that documentation + config stay aligned with a single source of truth.
-
-**Independent Test**: Configure `topics.base: lightspeed`, set suffixes `power: power`, `mode: mode`, `color: color`, `brightness: brightness`, `alert: alert`, `status: status`, `lwt: lwt`. Start the service and assert that MQTT subscriptions/publishes happen exactly on `lightspeed/<suffix>` with no manual concatenation.
+**Independent Test**: Configure `topics.base: lightspeed` and verify all topics are automatically generated as `lightspeed/status`, `lightspeed/switch`, etc.
 
 **Acceptance Scenarios**:
 
-1. **Given** a profile with `topics.base = lightspeed` and `topics.status = status`, **When** the service publishes status, **Then** the message is sent to `lightspeed/status` and the retained payload mirrors the structured status JSON.
-2. **Given** `topics.color = color` and `topics.brightness = brightness`, **When** Home Assistant publishes retained JSON commands to `lightspeed/color` or `lightspeed/brightness`, **Then** the service consumes them, updates cached values, and republishes the same payloads (retained) so HA dashboards resync after restart.
+1. **Given** a profile with `topics.base = lightspeed`, **When** the service starts, **Then** it subscribes to `lightspeed/switch`, `lightspeed/rgb/set`, `lightspeed/brightness/set`, `lightspeed/mode/set`, `lightspeed/alert`, `lightspeed/warn`, `lightspeed/info`.
+2. **Given** the service is running, **When** it publishes state, **Then** the message is sent to `lightspeed/status` with full state JSON (state, rgb, brightness, mode).
 
 ---
 
-### User Story 2 - Pilot Mode Topic (Priority: P1)
+### User Story 2 - Home Assistant Light Component (Priority: P1)
 
-As a Home Assistant user, I want a single retained `topics.mode` channel (payloads `pilot` or `logi`) to both command and reflect the Pilot switch so that ownership of the keyboard is unambiguous and survives reconnects.
+As a Home Assistant user, I want a single Light component that controls RGB color and brightness on my Logitech keyboard when in pilot mode, so I can integrate it with my existing lighting automations.
 
-**Why this priority**: Pilot control is central to the automation flow; a dedicated topic with deterministic semantics removes confusion and ensures retained state survives HA reconnects.
+**Why this priority**: Light component is the primary interface for Home Assistant users.
 
-**Independent Test**: With the service running, publish retained payload `pilot` to `<base>/mode` and observe the keyboard enter automation mode. Publish retained payload `logi` and confirm the service restores Logitech lighting and shuts down the DLL connection.
+**Independent Test**: Toggle the light on/off in Home Assistant and observe keyboard state changes. Change RGB and brightness and verify keyboard reflects the changes (in pilot mode only).
 
 **Acceptance Scenarios**:
 
-1. **Given** the service is connected and `topics.mode` currently equals `logi`, **When** a retained payload `pilot` arrives on `<base>/mode`, **Then** Pilot mode activates, cached color/brightness is replayed, and the service republishes `pilot` (retained) so HA mirrors the state.
-2. **Given** Pilot mode is active, **When** a retained payload `logi` is published to `<base>/mode`, **Then** the middleware restores Logitech control, shuts down the DLL session, and republishes `logi` as confirmation.
+1. **Given** pilot mode is ON and light is ON, **When** I change RGB to red in HA, **Then** keyboard turns red within 1 second.
+2. **Given** pilot mode is ON, **When** I turn the light OFF, **Then** keyboard turns black (0,0,0).
+3. **Given** pilot mode is OFF, **When** I change light state in HA, **Then** keyboard is not affected (Logitech controls it).
 
 ---
 
-### User Story 3 - JSON Alerts & LWT (Priority: P2)
+### User Story 3 - Pilot/Auto Mode Switch (Priority: P1)
 
-As an automation designer, I want the middleware to consume JSON overrides on `<base>/alert` and to expose an explicit `<base>/lwt` topic broadcasting `online`/`offline`, so downstream dashboards react uniformly to overrides and availability.
+As a Home Assistant user, I want a Mode switch that controls whether the program pilots my keyboard (pilot) or lets Logitech software control it (auto), so I can easily switch between automation and manual control.
 
-**Why this priority**: A single JSON contract keeps alert metadata consistent with the constitution, and a predictable LWT topic is critical for watchdogs that must know when the middleware is down.
+**Why this priority**: Essential for controlling when the program should manipulate the keyboard vs letting Logitech manage it.
 
-**Independent Test**: Publish retained `online` via `paho-mqtt` to `<base>/lwt` on connect and configure broker LWT to emit `offline`. Trigger Alert/Warning buttons by sending `{ "type": "alert" }` or `{ "type": "warning" }` to `<base>/alert` and verify the middleware respects timers while logging the event.
+**Independent Test**: Toggle mode switch in HA between pilot and auto, verify keyboard behavior changes accordingly.
 
 **Acceptance Scenarios**:
 
-1. **Given** the service receives `{ "type": "alert" }` on `<base>/alert`, **When** it begins the override, **Then** it validates payload fields, logs the request, enforces duration bounds, and resumes the prior mode when the override completes.
-2. **Given** the MQTT broker forcibly disconnects, **When** the session ends, **Then** Home Assistant and monitoring tools see `<base>/lwt` change to `offline` via the broker’s Last Will message without additional configuration per topic.
+1. **Given** mode is pilot, **When** I switch to auto, **Then** Logitech resumes control and keyboard returns to its original colors.
+2. **Given** mode is auto, **When** I switch to pilot, **Then** program takes control and applies current light state to keyboard.
 
 ---
 
-[Add more user stories as needed, each with an assigned priority]
+### User Story 4 - Visual Alert Buttons (Priority: P2)
+
+As an automation designer, I want 3 separate buttons (Alert, Warn, Info) that trigger visual patterns on the keyboard regardless of light state or mode, so I can get immediate visual notifications.
+
+**Why this priority**: Visual alerts should work even when program is not piloting the keyboard, providing critical notifications.
+
+**Independent Test**: Press each alert button and verify corresponding pattern plays on keyboard, then keyboard returns to appropriate state (Logitech control if auto mode, light state if pilot mode).
+
+**Acceptance Scenarios**:
+
+1. **Given** mode is auto, **When** I press Alert button, **Then** red pattern plays, then Logitech control is restored.
+2. **Given** mode is pilot and light is off, **When** I press Warn button, **Then** orange pattern plays, then keyboard returns to black.
+3. **Given** mode is pilot and light is on, **When** I press Info button, **Then** blue pattern plays, then keyboard returns to light color/brightness.
+
+---
+
+### User Story 5 - LWT & State Retention (Priority: P2)
+
+As a monitoring system, I want an LWT topic showing online/offline status and retained state that survives restarts, so I can track service availability and restore previous settings.
+
+**Why this priority**: Critical for monitoring and ensuring consistent state across restarts.
+
+**Independent Test**: Kill service and verify LWT shows offline. Restart service and verify it restores previous light state, mode, colors, and brightness from retained MQTT messages.
+
+**Acceptance Scenarios**:
+
+1. **Given** service is running, **When** I kill the process, **Then** `lightspeed/lwt` shows `offline` within 2 seconds.
+2. **Given** light was on with blue color at 50% brightness in pilot mode, **When** service restarts, **Then** it reads retained state and applies blue at 50% to keyboard.
+
+---
 
 ### Edge Cases
 
-- Base suffix contains a leading/trailing slash. System must normalize to avoid `//` or missing separators when composing `<base>/<suffix>`.
-- `topics.color` payload omits brightness metadata; middleware should replay the last retained brightness so HA state remains consistent.
-- `topics.mode` receives an unknown string (neither `pilot` nor `logi`). Middleware should default to handing control back (`logi`) and log the invalid value.
-- `<base>/alert` receives bursts (e.g., `{ "type": "alert" }` followed immediately by `{ "type": "warning" }`). Only one override may run at a time and the latest payload wins without leaving timers orphaned.
-- Broker drops retained `topics.color` payload; service restart should republish cached color/brightness so HA state remains consistent even if the broker cleared retention.
+- Base suffix contains leading/trailing slashes. System normalizes to avoid `//`.
+- Light state changes while in auto mode - keyboard is not affected.
+- Alert triggered while another alert is running - new alert interrupts previous one.
+- Mode switch toggled during alert - alert completes, then mode change applies.
+- Brightness command received as dict vs int - both formats handled correctly.
 
-## Requirements *(mandatory)*
-
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right functional requirements.
--->
+## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: `topics.base` MUST represent the full namespace root (e.g., `lightspeed`) and every other topic entry MUST be defined as a suffix relative to this base; the system concatenates them as `<base>/<suffix>` when subscribing/publishing.
-- **FR-002**: The configuration MUST expose the canonical fields `power`, `mode`, `color`, `brightness`, `alert`, `status`, and `lwt` inside `TopicMap`, each stored as a suffix yet derived to absolute topics at runtime.
-- **FR-003**: `topics.status` MUST store only the suffix (e.g., `status`), and the middleware MUST publish structured status JSON to `<base>/<topics.status>` while keeping the payload schema unchanged (state + attributes).
-- **FR-004**: `topics.mode` MUST be the authoritative retained channel where payload `pilot` enables integration control, payload `logi` relinquishes control, and any other value is rejected with a validation log. Transitioning to `logi` MUST immediately shut down the Logitech DLL session and restore saved lighting.
-- **FR-005**: Publishing to `topics.color` or `topics.brightness` MUST imply `topics.power = ON`, update cached values, and republish retained confirmations so HA dashboards stay in sync; `topics.power` payloads `ON`/`OFF` remain the source of truth for ownership.
-- **FR-006**: `topics.alert` MUST accept JSON payloads containing `{ "type": "alert" | "warning" | "info" }` and optional `{ "duration": int }` (1–300s). The middleware MUST validate payloads, enforce override timers, and log processing outcomes.
-- **FR-007**: `topics.lwt` MUST be published as retained `online` on connect, and the MQTT Last Will MUST emit retained `offline` on the same topic when the session drops unexpectedly.
-- **FR-008**: All derived topics (power, mode, color, brightness, alert, status, lwt, future additions) MUST reject absolute paths containing `/` when validation detects they would double-prefix the base, providing actionable config errors.
-- **FR-009**: Documentation (`README`, quickstarts, sample config) MUST reflect the canonical topics plus the new LWT requirement, including example payloads (retained flags, JSON schemas, mode semantics) and removal of legacy `auto`, `warning`, or `<base>/event` references.
+- **FR-001**: `topics.base` MUST be the only configurable topic field; all other topics are generated as `{base}/status`, `{base}/switch`, `{base}/rgb/set`, `{base}/brightness/set`, `{base}/mode/set`, `{base}/alert`, `{base}/warn`, `{base}/info`, `{base}/lwt`.
+- **FR-002**: Light component MUST publish full state to `{base}/status` as retained JSON containing `state` (on/off), `rgb` (array), `brightness` (0-255), `mode` (pilot/auto).
+- **FR-003**: Light commands MUST be received on `{base}/switch` (on/off), `{base}/rgb/set` (R,G,B), `{base}/brightness/set` (0-255).
+- **FR-004**: Mode switch MUST use `{base}/mode/set` for commands (payload: "pilot" or "auto") and read state from `{base}/status` JSON field `mode`.
+- **FR-005**: Alert buttons MUST use `{base}/alert`, `{base}/warn`, `{base}/info` with payload "press" to trigger visual patterns.
+- **FR-006**: Pilot mode MUST control whether light state is applied to keyboard - when OFF, keyboard is controlled by Logitech; when ON, keyboard reflects light state.
+- **FR-007**: Visual alerts MUST work regardless of mode or light state, and MUST restore appropriate state after completion (Logitech control if auto, light state if pilot).
+- **FR-008**: `{base}/lwt` MUST publish retained "online" on connect and "offline" via MQTT Last Will on disconnect.
+- **FR-009**: Service MUST read retained `{base}/status` on startup to restore previous state (light on/off, colors, brightness, mode).
+- **FR-010**: Home Assistant discovery MUST use device format with components: light, binary_sensor (status), switch (mode), 3 buttons (alert/warn/info).
 
-### Key Entities *(include if feature involves data)*
+### Key Entities
 
-- **TopicMap**: Logical representation containing `base`, `power`, `mode`, `color`, `brightness`, `alert`, `status`, `lwt`, derived command/state relationships, and validation rules ensuring suffix-only values.
-- **ModeMessage**: Conceptual payload placed on `<base>/mode`, including allowed values (`pilot`, `logi`), retain flag expectations, and the resulting ControlMode transition.
-- **AlertRequest**: JSON payload placed on `<base>/alert` that instructs the middleware which override to run (`type` + optional `duration`) alongside any future metadata the docs may permit.
+- **TopicMap**: Contains `base` and 9 derived fields: `state_topic`, `command_topic`, `rgb_command_topic`, `brightness_command_topic`, `mode_command_topic`, `alert_command_topic`, `warn_command_topic`, `info_command_topic`, `lwt`.
+- **ControlMode**: State machine tracking `pilot_switch` (bool), `light_on` (bool), `last_command_color` (RGB), `last_brightness` (int), `override` (alert/warn/info in progress).
+- **MqttLightingService**: Main service managing MQTT subscriptions, light state, mode control, and visual alerts.
 
-## Success Criteria *(mandatory)*
-
-<!--
-  ACTION REQUIRED: Define measurable success criteria.
-  These must be technology-agnostic and measurable.
--->
+## Success Criteria
 
 ### Measurable Outcomes
 
-- **SC-001**: Updating only `topics.base` in `config.yaml` MUST re-point every derived topic (power, mode, color, brightness, alert, status, lwt) without further edits, confirmed by a single integration test run.
-- **SC-002**: Pilot mode toggles via `<base>/mode` MUST apply within 1 second and publish the retained confirmation payload, verified over three consecutive toggles.
-- **SC-003**: Alert and warning triggers routed through `<base>/alert` (JSON payloads) MUST achieve 100% success across 10 manual invocations while respecting configured override durations.
-- **SC-004**: MQTT watchdogs subscribing to `<base>/lwt` MUST observe `offline` within broker-configured LWT timeout when the service is killed, and `online` within 2 seconds of reconnect.
+- **SC-001**: Configuration MUST contain only `topics.base`, all other topics are automatically derived.
+- **SC-002**: Mode switch MUST toggle between pilot/auto within 1 second.
+- **SC-003**: Light state changes MUST apply to keyboard within 1 second when in pilot mode.
+- **SC-004**: Visual alerts MUST play pattern and restore correct state within configured duration.
+- **SC-005**: Service restart MUST restore previous state (mode, light state, colors, brightness) from retained MQTT messages.
+- **SC-006**: LWT MUST show offline within 2 seconds of service termination.
+- **SC-007**: 25 unit tests MUST pass covering config validation, HA contracts, control mode, and observability.
+
+## Implementation Status
+
+### Completed ✅
+
+- Base topic configuration simplified to single `topics.base` field
+- All 9 topics auto-generated with fixed suffixes
+- Home Assistant light component with RGB and brightness control
+- Mode switch (pilot/auto) controlling keyboard piloting
+- 3 separate alert buttons (Alert, Warn, Info) working in all modes
+- LWT topic with online/offline status
+- Retained state bootstrapping on restart
+- 25 unit tests passing
+- Home Assistant device discovery with all components
+
+### Topics Schema
+
+```yaml
+topics:
+  base: lightspeed  # Only configurable field
+
+# Auto-generated:
+# - lightspeed/status → state_topic (retained, full state JSON)
+# - lightspeed/switch → command_topic (on/off for light)
+# - lightspeed/rgb/set → rgb_command_topic (R,G,B)
+# - lightspeed/brightness/set → brightness_command_topic (0-255)
+# - lightspeed/mode/set → mode_command_topic (pilot/auto)
+# - lightspeed/alert → alert_command_topic (button press)
+# - lightspeed/warn → warn_command_topic (button press)
+# - lightspeed/info → info_command_topic (button press)
+# - lightspeed/lwt → availability (online/offline)
+```
+
+### Home Assistant Integration
+
+Single device with 6 components:
+1. **Light** - RGB + brightness control (only applies in pilot mode)
+2. **Status Sensor** - Binary sensor showing connection status
+3. **Mode Switch** - Toggle between pilot (program controls) and auto (Logitech controls)
+4. **Alert Button** - Trigger red alert pattern
+5. **Warn Button** - Trigger orange warning pattern
+6. **Info Button** - Trigger blue info pattern
 
 ## Assumptions
 
-- Documentation and schema will treat suffix-only entries as required; advanced users no longer need to provide fully-qualified topic strings.
-- Home Assistant will continue to use JSON schema for the light entity; switching to `<base>/color` does not change payload structure beyond the retained requirement.
-- `logi` is the canonical payload meaning “Logitech takes control.” Any other payloads MUST be rejected with warning logs to avoid silent misconfiguration.
+- Home Assistant uses MQTT device discovery format with components
+- Light component follows HA MQTT light JSON schema
+- Mode switch is independent of light state
+- Visual alerts temporarily override current state, then restore it
+- Logitech SDK (LogitechLed.dll) is available and G Hub/LGS is running

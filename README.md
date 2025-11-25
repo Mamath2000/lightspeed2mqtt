@@ -52,17 +52,6 @@ mqtt:
 
 topics:
   base: lightspeed/alerts # Préfixe commun pour toutes les entités HA
-  power: "" # Laisser vide pour dériver <base>/power (payload ON/OFF retenu)
-  power_state: "" # Retained miroir (défaut = <topics.power>/state)
-  mode: "" # Laisser vide pour dériver <base>/mode (payload pilot/logi)
-  mode_state: "" # Retained miroir du mode
-  color: "" # Commandes RGB dérivées (<base>/color)
-  color_state: "" # Retained couleur (<topics.color>/state)
-  brightness: "" # Commandes 0-100 dérivées (<base>/brightness)
-  brightness_state: "" # Retained luminosité (<topics.brightness>/state)
-  alert: "" # Overrides JSON (type/duration) dérivés (<base>/alert)
-  status: "" # Sujet JSON retained (<base>/status)
-  lwt: "" # Sujet availability online/offline (<base>/lwt)
 
 home_assistant:
   device_id: lightspeed-alerts

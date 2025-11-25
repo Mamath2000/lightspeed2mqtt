@@ -51,25 +51,47 @@ def test_iter_discovery_messages_publishes_single_device_payload(tmp_path):
 
     assert len(messages) == 1
     message = messages[0]
-    assert message.topic == f"homeassistant/light/{profile.home_assistant.device_id}/config"
+    assert message.topic == f"homeassistant/device/{profile.home_assistant.device_id}/config"
 
     payload = json.loads(message.payload)
-    assert payload["name"] == "Lightspeed"
-    assert payload["optimistic"] is False
-    assert payload["state_topic"] == "foo/bar/status"
-    assert payload["state_value_template"] == "{{ value_json.state }}"
-    assert payload["command_topic"] == "foo/bar/switch"
-    assert payload["payload_on"] == "on"
-    assert payload["payload_off"] == "off"
-    assert payload["rgb_command_topic"] == "foo/bar/rgb/set"
-    assert payload["rgb_value_template"] == "{{ value_json.rgb | join(',') }}"
-    assert payload["brightness_command_topic"] == "foo/bar/brightness/set"
-    assert payload["brightness_value_template"] == "{{ value_json.brightness }}"
-    assert payload["effect"] is True
-    assert payload["effect_command_topic"] == "foo/bar/effect/set"
-    assert payload["effect_list"] == ["None", "Alert", "Warn", "Info"]
-    assert payload["effect_state_topic"] == "foo/bar/status"
-    assert payload["effect_value_template"] == "{{ value_json.effect }}"
-    assert payload["unique_id"] == "foo"
-    assert payload["object_id"] == "foo"
+    
+    # Vérifier la structure device
+    assert "device" in payload
     assert payload["device"]["name"] == "Foo Device"
+    assert "components" in payload
+    
+    # Vérifier le composant light
+    light = payload["components"]["light"]
+    assert light["platform"] == "light"
+    assert light["unique_id"] == "foo_light"
+    assert light["state_topic"] == "foo/bar/status"
+    assert light["command_topic"] == "foo/bar/switch"
+    assert light["rgb_command_topic"] == "foo/bar/rgb/set"
+    assert light["brightness_command_topic"] == "foo/bar/brightness/set"
+    # Les effets ne sont plus sur le light
+    assert "effect" not in light
+    assert "effect_command_topic" not in light
+    
+    # Vérifier le composant status_sensor
+    status = payload["components"]["status_sensor"]
+    assert status["platform"] == "binary_sensor"
+    assert status["unique_id"] == "foo_status"
+    
+    # Vérifier le composant mode_switch
+    mode = payload["components"]["mode_switch"]
+    assert mode["platform"] == "switch"
+    assert mode["unique_id"] == "foo_mode"
+    assert mode["command_topic"] == "foo/bar/mode/set"
+    
+    # Vérifier les 3 boutons d'alerte
+    alert_btn = payload["components"]["alert_button"]
+    assert alert_btn["platform"] == "button"
+    assert alert_btn["command_topic"] == "foo/bar/alert"
+    
+    warn_btn = payload["components"]["warn_button"]
+    assert warn_btn["platform"] == "button"
+    assert warn_btn["command_topic"] == "foo/bar/warn"
+    
+    info_btn = payload["components"]["info_button"]
+    assert info_btn["platform"] == "button"
+    assert info_btn["command_topic"] == "foo/bar/info"
