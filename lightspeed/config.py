@@ -87,6 +87,7 @@ class PaletteDefinition:
 class Palettes:
     alert: PaletteDefinition
     warning: PaletteDefinition
+    info: PaletteDefinition
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,6 @@ class LogitechSettings:
 
 @dataclass(frozen=True)
 class ObservabilitySettings:
-    health_topic: str
     log_level: str
 
 
@@ -185,6 +185,7 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
     palettes = Palettes(
         alert=_parse_palette("alert", palettes_data.get("alert")),
         warning=_parse_palette("warning", palettes_data.get("warning")),
+        info=_parse_palette("info", palettes_data.get("info")),
     )
 
     logitech = LogitechSettings(
@@ -193,11 +194,6 @@ def load_config(path: Optional[Path | str] = None, *, env: Optional[Mapping[str,
     )
 
     observability = ObservabilitySettings(
-        health_topic=_require_str(
-            observability_data,
-            "health_topic",
-            default=f"{topic_base}/status",
-        ),
         log_level=_require_str(observability_data, "log_level", default="INFO"),
     )
 
@@ -269,8 +265,18 @@ def _default_frames(name: str) -> Tuple[PaletteFrame, ...]:
             PaletteFrame((255, 255, 255), 150),
             PaletteFrame((0, 0, 0), 150),
         )
+    if name == "warning":
+        return (
+            PaletteFrame((255, 140, 0), 150),
+            PaletteFrame((0, 0, 0), 150),
+        )
+    if name == "info":
+        return (
+            PaletteFrame((255, 255, 255), 150),
+            PaletteFrame((85, 85, 85), 150),
+        )
     return (
-        PaletteFrame((255, 140, 0), 200),
+        PaletteFrame((255, 255, 255), 200),
         PaletteFrame((0, 0, 0), 200),
     )
 
@@ -384,7 +390,7 @@ def _validate_profile(profile: ConfigProfile) -> None:
             f"Niveau de log invalide: {profile.observability.log_level}. Attendu: {sorted(ALLOWED_LOG_LEVELS)}"
         )
 
-    for palette in (profile.palettes.alert, profile.palettes.warning):
+    for palette in (profile.palettes.alert, profile.palettes.warning, profile.palettes.info):
         if not palette.frames:
             raise ConfigError(f"Le palette {palette.name} doit contenir au moins une frame")
         limit = PALETTE_DURATION_LIMITS.get(palette.name, palette.max_duration_ms)

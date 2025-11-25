@@ -10,7 +10,6 @@ mqtt:
   client_id: lightspeed-led # Nom du client MQTT
   keepalive: 60 # Intervalle keepalive en secondes
 
-
 topics:
   base: lightspeed # Préfixe commun pour toutes les entités HA
 
@@ -46,11 +45,16 @@ palettes:
       duration_ms: 150
     - color: "#000000"
       duration_ms: 150
+  info:
+    max_duration_ms: 200
+    frames:
+    - color: "#FFFFFF"
+      duration_ms: 150
+    - color: "#555555"
+      duration_ms: 150
 
 logitech:
   dll_path: "C:\\Users\\Mamat\\OneDrive\\Documents\\lightspeed2mqtt\\lib\\LogitechLed.dll" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
-  profile_backup: "backup.json" # Fichier où stocker l'état initial
 
 observability:
-  health_topic: "lightspeed/health"
   log_level: "INFO"

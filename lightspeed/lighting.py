@@ -243,15 +243,28 @@ def ensure_logi_dll_loaded(override_path: Optional[Path] = None) -> bool:
 
 
 def palette_frames(palette: PaletteDefinition) -> Tuple[PatternFrame, ...]:
-    return tuple((frame.color, frame.duration_ms / 1000.0) for frame in palette.frames)
+    frames = tuple((frame.color, frame.duration_ms / 1000.0) for frame in palette.frames)
+    logger.debug(
+        "palette_frames: Palette '%s' utilisée: %s",
+        getattr(palette, 'name', '?'),
+        [
+            {"color": f"#{r:02X}{g:02X}{b:02X}", "duration": d}
+            for (r, g, b), d in frames
+        ]
+    )
+    return frames
 
 
 def alert_frames(profile: ConfigProfile) -> Tuple[PatternFrame, ...]:
+    """Retourne les frames de la palette d'alerte."""
     return palette_frames(profile.palettes.alert)
 
 
 def warning_frames(profile: ConfigProfile) -> Tuple[PatternFrame, ...]:
     return palette_frames(profile.palettes.warning)
+
+def info_frames(profile: ConfigProfile) -> Tuple[PatternFrame, ...]:
+    return palette_frames(profile.palettes.info)
 
 
 def default_color(profile: ConfigProfile) -> RGB:

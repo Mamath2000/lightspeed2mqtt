@@ -18,6 +18,7 @@ class Mode(str, Enum):
     LOGI = "logi"
     OVERRIDE_ALERT = "override_alert"
     OVERRIDE_WARNING = "override_warning"
+    OVERRIDE_INFO = "override_info"
 
 
 def parse_mode_payload(payload: Optional[str]) -> Mode | None:
@@ -42,15 +43,23 @@ class OverrideAction:
     started_at: datetime
     timer_handle: Any | None = None
 
+
     def __post_init__(self) -> None:
-        if self.kind not in {"alert", "warning"}:
-            raise ValueError("kind must be 'alert' or 'warning'")
+        if self.kind not in {"alert", "warning", "info"}:
+            raise ValueError("kind must be 'alert', 'warning' ou 'info'")
         if self.duration_seconds <= 0:
             raise ValueError("duration_seconds must be positive")
 
+
     @property
     def mode(self) -> Mode:
-        return Mode.OVERRIDE_ALERT if self.kind == "alert" else Mode.OVERRIDE_WARNING
+        if self.kind == "alert":
+            return Mode.OVERRIDE_ALERT
+        if self.kind == "warning":
+            return Mode.OVERRIDE_WARNING
+        if self.kind == "info":
+            return Mode.OVERRIDE_INFO
+        raise ValueError(f"kind inconnu: {self.kind}")
 
     @property
     def expires_at(self) -> datetime:

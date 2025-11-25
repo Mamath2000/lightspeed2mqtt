@@ -51,7 +51,6 @@ def test_load_config_happy_path(tmp_path):
         logitech:
           profile_backup: backup.json
         observability:
-          health_topic: foo/bar/health
           log_level: INFO
         """,
     )
@@ -300,31 +299,3 @@ def test_topics_allow_custom_suffixes(tmp_path):
     assert profile.topics.info_command_topic == "foo/bar/info"
 
 
-def test_health_topic_defaults_to_status(tmp_path):
-    config_path = _write_config(
-        tmp_path,
-        """
-        mqtt:
-          host: localhost
-          client_id: alerts
-        topics:
-          base: foo/bar
-        home_assistant:
-          device_id: foo
-          device_name: Foo
-          manufacturer: Test
-          model: RevA
-        lighting:
-          default_color: "#112233"
-          lock_file: lock
-        palettes: {}
-        logitech:
-          profile_backup: backup.json
-        observability:
-          log_level: INFO
-        """,
-    )
-
-    profile = load_config(config_path)
-
-    assert profile.observability.health_topic == "foo/bar/status"

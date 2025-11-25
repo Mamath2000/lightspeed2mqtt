@@ -32,24 +32,30 @@ palettes:
   alert:
     max_duration_ms: 500 # Ne jamais dépasser 500 ms (Principe IV)
     frames:
-    - color: "#FF0000"
-      duration_ms: 150
-    - color: "#FFFFFF"
-      duration_ms: 150
-    - color: "#000000"
-      duration_ms: 150
+      - color: "#FF0000"
+        duration_ms: 150
+      - color: "#FFFFFF"
+        duration_ms: 150
+      - color: "#000000"
+        duration_ms: 150
   warning:
     max_duration_ms: 350
     frames:
-    - color: "#FF8C00"
-      duration_ms: 150
-    - color: "#000000"
-      duration_ms: 150
+      - color: "#FF8C00"
+        duration_ms: 150
+      - color: "#000000"
+        duration_ms: 150
+  info:
+    max_duration_ms: 200
+    frames:
+      - color: "#FFFFFF"
+        duration_ms: 150
+      - color: "#555555"
+        duration_ms: 150
 
 logitech:
   dll_path: "" # Chemin personnalisé vers LogitechLed.dll (laisser vide pour auto)
   profile_backup: "backup.json" # Fichier où stocker l'état initial
 
 observability:
-  health_topic: "" # Laisser vide pour réutiliser <topics.status>
   log_level: "INFO"

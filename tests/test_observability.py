@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from lightspeed.control_mode import ControlMode
-from lightspeed.observability import build_status_payload, publish_availability, publish_health, publish_status
+from lightspeed.observability import build_status_payload, publish_availability, publish_status
 
 
 def test_build_status_payload_includes_mode_metadata():
@@ -42,7 +42,7 @@ class _FakeClient:
 
 def _fake_profile(*, status: str = "base/status", health: str | None = None, lwt: str = "base/lwt"):
     topics = SimpleNamespace(status=status, lwt=lwt)
-    observability = SimpleNamespace(health_topic=health if health is not None else status)
+    observability = SimpleNamespace()
     return SimpleNamespace(
         topics=topics,
         observability=observability,
@@ -63,21 +63,6 @@ def test_publish_status_targets_status_topic():
     assert call["retain"] is True
     assert call["qos"] == 1
     assert json.loads(call["payload"])["reason"] == "boot"
-
-
-def test_publish_health_falls_back_to_status_topic_when_empty():
-    client = _FakeClient()
-    profile = _fake_profile(health="")
-    timestamp = datetime.now(timezone.utc)
-
-    publish_health(
-        client,
-        profile,
-        status="online",
-        validated_at=timestamp,
-        validation_status="passed",
-        last_error=None,
-    )
 
     call = client.calls[-1]
     assert call["topic"] == profile.topics.status

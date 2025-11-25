@@ -165,7 +165,7 @@ class MqttLightingService:
         logger.info("Connecté au broker")
         self._publish_availability("online")
         self._publish_light_state()
-        self._publish_mode_state()
+        # self._publish_mode_state()  # Suppression : ne publie plus le mode seul sur state_topic
         self._publish_discovery()
 
     def on_message(self, _client: mqtt.Client, _userdata, message) -> None:
@@ -212,18 +212,7 @@ class MqttLightingService:
             retain=True
         )
 
-    def _publish_mode_state(self) -> None:
-        """Publie l'état du mode (pilot/auto) séparément pour le switch."""
-        if not self._connected:
-            return
-        
-        mode = "pilot" if self.control.pilot_switch else "auto"
-        self.client.publish(
-            self.profile.topics.state_topic,
-            payload=json.dumps({"mode": mode}, separators=(",", ":")),
-            qos=1,
-            retain=False  # Non-retained car déjà dans state_topic
-        )
+    # _publish_mode_state supprimé : le mode est inclus dans l'état complet publié par _publish_light_state
 
     def _handle_switch_command(self, payload: str) -> None:
         """Gère les commandes on/off sur command_topic."""
@@ -367,9 +356,9 @@ class MqttLightingService:
         logger.info("⚠️ Avertissement visuel déclenché")
 
     def _handle_info_button(self) -> None:
-        """Déclenche une alerte visuelle Info (bleu clignotant)."""
+        """Déclenche une alerte visuelle Info (palette info)."""
         duration = self.profile.effects.override_duration_seconds
-        self._handle_override_command(AlertCommand(kind="alert", duration=duration))
+        self._handle_override_command(AlertCommand(kind="info", duration=duration))
         logger.info("ℹ️ Info visuelle déclenchée")
 
     def _handle_mode_command(self, payload: str) -> None:
@@ -436,13 +425,26 @@ class MqttLightingService:
             self.client.publish(message.topic, payload=message.payload, qos=1, retain=message.retain)
 
     def _handle_override_command(self, command: AlertCommand) -> None:
-        """Démarre un effet (alert ou warning)."""
+        """Démarre un effet (alert, warning ou info) avec logs détaillés sur les frames."""
         self._clear_override(resume_base=False, event="replaced")
         lighting = _lighting_module()
-        frames = (
-            lighting.alert_frames(self.profile)
-            if command.kind == "alert"
-            else lighting.warning_frames(self.profile)
+        if command.kind == "alert":
+            frames = lighting.alert_frames(self.profile)
+        elif command.kind == "warning":
+            frames = lighting.warning_frames(self.profile)
+        elif command.kind == "info":
+            frames = lighting.info_frames(self.profile)
+        else:
+            logger.warning(f"Type d'effet inconnu: {command.kind}")
+            return
+        # Log détaillé sur les frames utilisées
+        logger.debug(
+            "Palette utilisée pour %s: %s",
+            command.kind,
+            [
+                {"color": f"#{r:02X}{g:02X}{b:02X}", "duration": d}
+                for (r, g, b), d in frames
+            ]
         )
         timer = self._timer_factory(command.duration, self._complete_override, args=(command.kind,))
         timer.daemon = True
@@ -452,6 +454,7 @@ class MqttLightingService:
             duration_seconds=command.duration,
             timer_handle=timer,
         )
+        logger.debug("Lancement du pattern sur le contrôleur: %r", frames)
         self.controller.start_pattern(frames)
         logger.info("Effet %s démarré", command.kind, extra={"duration": command.duration})
         self.control = control
