@@ -11,32 +11,94 @@ import time
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
-
+import types
 from lightspeed.config import ConfigProfile, PaletteDefinition
 
-# Charger explicitement la DLL LogitechLed depuis lib/ avant d'importer logipy
-import importlib
+# Charger explicitement la DLL LogitechLed depuis lib/
 _dll_name = "LogitechLed.dll"
 _dll_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'lib', _dll_name))
-_dll_handle = None
-if os.path.exists(_dll_path):
-    try:
-        _dll_handle = ctypes.WinDLL(_dll_path)
-    except Exception as e:
-        sys.stderr.write(f"[ERREUR] Impossible de charger la DLL LogitechLed depuis {_dll_path}: {e}\n")
-        sys.exit(1)
-else:
-    sys.stderr.write(f"[ERREUR] DLL LogitechLed non trouvée à l'emplacement attendu : {_dll_path}\n")
+
+if not os.path.exists(_dll_path):
+    sys.stderr.write(f"[ERREUR] DLL LogitechLed non trouvée : {_dll_path}\n")
     sys.exit(1)
 
-from logipy import logi_led
-# Injecter le handle pour forcer logipy à utiliser la bonne DLL
-logi_led.led_dll = _dll_handle
+try:
+    _dll_handle = ctypes.WinDLL(_dll_path)
+except Exception as e:
+    sys.stderr.write(f"[ERREUR] Impossible de charger la DLL LogitechLed depuis {_dll_path}: {e}\n")
+    sys.exit(1)
 
+# --- Patch logipy.logi_led avant import ---
+# Créer un faux module logipy.logi_led avec une exception correcte
+fake_logi_led = types.ModuleType("logipy.logi_led")
+
+class SDKNotFoundException(Exception):
+    """Exception corrigée pour logipy quand la DLL n'est pas trouvée."""
+    pass
+
+fake_logi_led.SDKNotFoundException = SDKNotFoundException
+fake_logi_led.led_dll = _dll_handle
+
+# Enregistrer ce faux module dans sys.modules
+sys.modules["logipy.logi_led"] = fake_logi_led
+
+# Importer logi_led (utilisera notre patch)
+import logipy.logi_led as logi_led
+
+# Wrappers Python pour les fonctions de base du SDK
+def logi_led_init():
+    return logi_led.led_dll.LogiLedInit()
+
+def logi_led_shutdown():
+    return logi_led.led_dll.LogiLedShutdown()
+
+def logi_led_set_lighting(red, green, blue):
+    return logi_led.led_dll.LogiLedSetLighting(red, green, blue)
+
+def logi_led_flash_lighting(red, green, blue, duration_ms, interval_ms):
+    return logi_led.led_dll.LogiLedFlashLighting(red, green, blue, duration_ms, interval_ms)
+
+def logi_led_pulse_lighting(red, green, blue, duration_ms, interval_ms):
+    return logi_led.led_dll.LogiLedPulseLighting(red, green, blue, duration_ms, interval_ms)
+
+def logi_led_save_current_lighting():
+    return logi_led.led_dll.LogiLedSaveCurrentLighting()
+
+def logi_led_restore_lighting():
+    return logi_led.led_dll.LogiLedRestoreLighting()
+
+
+# Attacher ces fonctions au module patché
+logi_led.logi_led_init = logi_led_init
+logi_led.logi_led_shutdown = logi_led_shutdown
+logi_led.logi_led_set_lighting = logi_led_set_lighting
+logi_led.logi_led_flash_lighting = logi_led_flash_lighting
+logi_led.logi_led_pulse_lighting = logi_led_pulse_lighting
+logi_led.logi_led_save_current_lighting = logi_led_save_current_lighting
+logi_led.logi_led_restore_lighting = logi_led_restore_lighting
+
+# Types utilitaires
 RGB = Tuple[int, int, int]
 PatternFrame = Tuple[RGB, float]
+
 logger = logging.getLogger(__name__)
 
+# Petit test pour vérifier que la DLL répond
+def _test_led():
+    try:
+        if logi_led.led_dll:  # Vérifie que le handle est bien injecté
+            # Appel direct à une fonction de la DLL via ctypes
+            # Exemple : logiLedInit (si exposée par la DLL)
+            if hasattr(logi_led.led_dll, "LogiLedInit"):
+                ok = logi_led.led_dll.LogiLedInit()
+                if ok:
+                    logger.info("DLL LogitechLed initialisée et test réussi.")
+                else:
+                    logger.error("Échec d'initialisation de la DLL LogitechLed.")
+            else:
+                logger.warning("La fonction LogiLedInit n'est pas exposée par la DLL.")
+    except Exception as e:
+        logger.error(f"Erreur lors du test de la DLL : {e}")
 
 def clamp_channel(value: int) -> int:
     return max(0, min(255, int(value)))
