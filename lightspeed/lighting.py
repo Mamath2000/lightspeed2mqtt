@@ -5,6 +5,7 @@ import ctypes
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -125,7 +126,12 @@ class LightingController:
         if self.initialized:
             return
         if not ensure_logi_dll_loaded(self.dll_path):
-            raise RuntimeError("Impossible de trouver 'LogitechLed.dll'. Définissez LOGI_LED_DLL ou placez la DLL à la racine.")
+            sys.stderr.write("\nERREUR CRITIQUE : DLL LogitechLed manquante\n\n")
+            sys.stderr.write("Impossible de trouver 'LogitechLed.dll'.\n")
+            sys.stderr.write("Définissez la variable d'environnement LOGI_LED_DLL ou placez la DLL dans le dossier 'lib' à la racine du projet.\n\n")
+            sys.stderr.write("Cette DLL est fournie avec le SDK Logitech LED.\n")
+            sys.stderr.write("Téléchargez-la sur le site Logitech ou récupérez-la depuis une installation G HUB/LGS.\n\n")
+            sys.exit(1)
         self._acquire_lock()
         try:
             if not logi_led.logi_led_init():
