@@ -1,15 +1,18 @@
 test:
 # Makefile pour lightspeed2mqtt
 
-.PHONY: help run test venv install
+.PHONY: help run test venv install add_service remove_service stop_service
 
 
 help:
 	@echo "Options disponibles :"
-	@echo "  make install: créer le venv et installer les requirements"
-	@echo "  make run    : lancer l'application (simple-logi.py)"
-	@echo "  make test   : lancer tous les tests (pytest tests)"
-	@echo "  make help   : afficher cette aide"
+	@echo "  make install       : créer le venv et installer les requirements"
+	@echo "  make run           : lancer l'application (simple-logi.py)"
+	@echo "  make test          : lancer tous les tests (pytest tests)"
+	@echo "  make add_service   : installer le service Windows via nssm"
+	@echo "  make remove_service: désinstaller le service Windows via nssm"
+	@echo "  make stop_service  : arrêter le service Windows via nssm"
+	@echo "  make help          : afficher cette aide"
 
 
 # Variables pour le service
