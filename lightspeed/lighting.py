@@ -170,9 +170,48 @@ class LightingController:
         except Exception:  # pragma: no cover - best effort path creation
             pass
         if self.lock_file.exists():
-            raise RuntimeError(
-                f"Le verrou {self.lock_file} existe déjà. Assurez-vous qu'aucune autre instance n'est en cours ou supprimez le fichier."
-            )
+            # Tentative de détection d'un verrou "stale" (ancienne instance).
+            pid = None
+            timestamp = None
+            try:
+                content = self.lock_file.read_text(encoding="utf-8")
+                info = json.loads(content)
+                pid = int(info.get("pid")) if info.get("pid") is not None else None
+                timestamp = float(info.get("timestamp")) if info.get("timestamp") is not None else None
+            except Exception:
+                pid = None
+                timestamp = None
+
+            stale = False
+            # Vérifier si le PID mentionné est toujours vivant
+            if pid is not None:
+                try:
+                    os.kill(pid, 0)
+                except Exception:
+                    stale = True
+
+            # Considérer stale si le fichier est trop ancien (par défaut 5 minutes)
+            try:
+                max_age = int(os.environ.get("LOGI_LOCK_STALE_SECONDS", "300"))
+            except Exception:
+                max_age = 300
+            if not stale and timestamp is not None:
+                try:
+                    if (time.time() - timestamp) > max_age:
+                        stale = True
+                except Exception:
+                    pass
+
+            if stale:
+                try:
+                    logger.warning("Verrou stale détecté (%s). Suppression du fichier de verrou.", self.lock_file)
+                    self.lock_file.unlink()
+                except Exception:
+                    logger.warning("Impossible de supprimer le verrou stale %s", self.lock_file)
+            else:
+                raise RuntimeError(
+                    f"Le verrou {self.lock_file} existe déjà. Assurez-vous qu'aucune autre instance n'est en cours ou supprimez le fichier."
+                )
         payload = {
             "pid": os.getpid(),
             "timestamp": time.time(),
