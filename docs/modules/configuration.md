@@ -29,11 +29,6 @@ Validations importantes (dans `lightspeed.config._validate_profile`):
 - Palettes avec frames valides et respectant les durées max (principe IV).
 - Composantes RGB entre 0 et 255.
 
-Génération et synchronisation des docs de configuration :
-
-- `lightspeed.config_docs.render_config_field_table()` génère un tableau Markdown des clés de configuration.
-- `scripts/update_config_docs.py` injecte le snippet `config.example.yaml` et la table dans `README.md` et `specs/.../quickstart.md`.
-
 Fichiers utiles :
 
 - Exemple : [config.example.yaml](../config.example.yaml)

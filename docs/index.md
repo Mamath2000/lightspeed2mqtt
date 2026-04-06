@@ -33,4 +33,3 @@ Voir les pages modules pour la documentation technique détaillée :
   - [Control Mode](./modules/control-mode)
   - [Home Assistant (HA) discovery](./modules/ha-contracts)
   - [CLI (simple-logi)](./modules/cli)
-  - [Génération de la doc config](./modules/config-docs)

@@ -20,17 +20,11 @@ Exécuter les tests :
 pytest -q
 ```
 
-Synchroniser la documentation de configuration :
-
-```bash
-python scripts/update_config_docs.py
-```
-
 Bonnes pratiques :
 
 - Garder les tests locaux verts avant de pousser.
 - Utiliser des branches nommées `fix/...` ou `docs/...` pour changements isolés.
-- Le script `scripts/update_config_docs.py` génère automatiquement le tableau des clés de configuration et met à jour `README.md` et `specs/.../quickstart.md`.
+- Mettre à jour manuellement `config.example.yaml` et les extraits de doc si le schéma de configuration change.
 
 Dépannage rapide :
 
