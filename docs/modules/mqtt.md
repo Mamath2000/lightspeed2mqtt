@@ -39,5 +39,5 @@ Notes opérationnelles :
 - Les messages d'état publiés sont JSON compressés (séparateurs `(',', ':')`) pour réduire la taille.
 
 Voir aussi :
-- [Home Assistant discovery](./ha_contracts)
+- [Home Assistant discovery](./ha-contracts)
 - [Observability / LWT](./observability)

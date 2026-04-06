@@ -27,10 +27,10 @@ Voir les pages modules pour la documentation technique détaillée :
 
 - Modules :
   - [Configuration](./modules/configuration)
-  - [MQTT & Service](./modules/mqtt)
+  - [MQTT & Service](./modules/mqtt-service)
   - [Lighting / SDK](./modules/lighting)
   - [Observability](./modules/observability)
-  - [Control Mode](./modules/control_mode)
-  - [Home Assistant (HA) discovery](./modules/ha_contracts)
+  - [Control Mode](./modules/control-mode)
+  - [Home Assistant (HA) discovery](./modules/ha-contracts)
   - [CLI (simple-logi)](./modules/cli)
-  - [Génération de la doc config](./modules/config_docs)
+  - [Génération de la doc config](./modules/config-docs)
