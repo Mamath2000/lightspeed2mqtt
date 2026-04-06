@@ -3,7 +3,7 @@
 # Toutes les clés doivent rester présentes pour que la validation réussisse.
 
 mqtt:
-  host: 192.168.100.190 # Hôte / IP du broker
+  host: 192.168.100.9 # Hôte / IP du broker
   port: 1883 # Port TCP (1883 sans TLS)
   username: "" # Identifiant optionnel
   password: "" # Secret optionnel (peut référencer une variable d'environnement)
