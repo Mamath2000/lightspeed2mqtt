@@ -25,3 +25,4 @@ docs/LED_SDK_9.00/
 lightspeed.lock
 .vscode
 /LED_SDK_9.00
+config.yaml
