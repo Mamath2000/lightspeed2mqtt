@@ -20,7 +20,7 @@ class DiscoveryMessage:
 def _device_descriptor(profile: ConfigProfile) -> dict:
     device = profile.home_assistant
     return {
-        "identifiers": [f"lightspeed2mqtt:{device.device_id}"],
+        "identifiers": [f"lightspeed2mqtt_{device.device_id}"],
         "name": device.device_name,
         "manufacturer": device.manufacturer,
         "model": device.model,
