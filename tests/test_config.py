@@ -167,6 +167,84 @@ def test_palette_duration_limit_enforced(tmp_path):
         load_config(config_path)
 
 
+def test_palette_duration_seconds_overrides_global_default(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+        mqtt:
+          host: localhost
+          client_id: alerts
+        topics:
+          base: foo/bar
+        home_assistant:
+          device_id: foo
+          device_name: Foo
+          manufacturer: Test
+          model: RevA
+        lighting:
+          default_color: "#112233"
+          lock_file: lock
+        effects:
+          override_duration_seconds: 10
+        palettes:
+          alert:
+            max_duration_ms: 500
+            duration_seconds: 20
+            frames:
+            - color: "#FF0000"
+              duration_ms: 150
+          warning: {}
+        logitech:
+          profile_backup: backup.json
+        observability:
+          log_level: INFO
+        """,
+    )
+
+    config = load_config(config_path)
+
+    assert config.palettes.alert.duration_seconds == 20
+    assert config.palettes.alert.resolve_duration_seconds(config.effects.override_duration_seconds) == 20
+    # Palette sans duration_seconds -> retombe sur la valeur globale.
+    assert config.palettes.warning.duration_seconds is None
+    assert config.palettes.warning.resolve_duration_seconds(config.effects.override_duration_seconds) == 10
+
+
+def test_palette_duration_seconds_out_of_range_raises(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+        mqtt:
+          host: localhost
+          client_id: alerts
+        topics:
+          base: foo/bar
+        home_assistant:
+          device_id: foo
+          device_name: Foo
+          manufacturer: Test
+          model: RevA
+        lighting:
+          default_color: "#112233"
+          lock_file: lock
+        palettes:
+          alert:
+            max_duration_ms: 500
+            duration_seconds: 0
+            frames:
+            - color: "#FF0000"
+              duration_ms: 150
+        logitech:
+          profile_backup: backup.json
+        observability:
+          log_level: INFO
+        """,
+    )
+
+    with pytest.raises(ConfigError):
+        load_config(config_path)
+
+
 def test_env_substitution_applies_values(tmp_path):
     config_path = _write_config(
         tmp_path,

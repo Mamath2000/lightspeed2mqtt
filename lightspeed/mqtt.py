@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from types import ModuleType
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import paho.mqtt.client as mqtt
 
@@ -46,6 +46,9 @@ def _lighting_module() -> ModuleType:
 logger = logging.getLogger(__name__)
 
 
+RETAINED_STATE_TIMEOUT = 5.0
+
+
 class MqttLightingService:
     def __init__(self, controller: "LightingController", profile: ConfigProfile, *, validated_at: datetime) -> None:
         self.controller = controller
@@ -54,7 +57,8 @@ class MqttLightingService:
         self.stop_event = threading.Event()
         self.last_error: str | None = None
         self.control = ControlMode.bootstrap(default_color=profile.lighting.default_color)
-        # Initialiser avec un état par défaut (lumière on, couleur par défaut, brightness max)
+        # État par défaut utilisé si aucun état retained n'est trouvé au démarrage
+        # (lumière on, couleur par défaut, brightness max).
         self.control = self.control.set_light_state(on=True).record_color_command(
             base_color=profile.lighting.default_color,
             brightness=255,
@@ -62,6 +66,11 @@ class MqttLightingService:
         self._connected = False
         self.client = mqtt.Client(client_id=profile.mqtt.client_id, clean_session=True)
         self._timer_factory = threading.Timer
+        # Bootstrap de l'état retained : résolu une seule fois, soit par réception du
+        # message retained sur state_topic, soit par expiration du délai d'attente.
+        self._bootstrap_event = threading.Event()
+        self._bootstrap_lock = threading.Lock()
+        self._retained_state_timeout = RETAINED_STATE_TIMEOUT
         if profile.mqtt.username:
             self.client.username_pw_set(profile.mqtt.username, profile.mqtt.password or None)
         self.client.on_connect = self.on_connect
@@ -102,16 +111,45 @@ class MqttLightingService:
         except Exception as exc:
             logger.warning("Échec du bootstrap depuis retained", extra={"error": str(exc)})
 
-    def start(self) -> None:
-        self.controller.start()
-        
-        # Appliquer l'état actuel au clavier seulement si en mode pilot
+    def _handle_retained_bootstrap(self, raw_payload: bytes) -> None:
+        """Traite le premier message reçu sur state_topic comme état retained."""
+        text = raw_payload.decode("utf-8", errors="ignore").strip()
+        state: Optional[dict] = None
+        if text:
+            try:
+                state = json.loads(text)
+            except json.JSONDecodeError as exc:
+                logger.warning("État retained illisible (JSON invalide)", extra={"error": str(exc)})
+        self._finish_bootstrap(state)
+
+    def _finish_bootstrap(self, state: Optional[dict]) -> None:
+        """Résout le bootstrap une seule fois, puis applique l'état au matériel."""
+        with self._bootstrap_lock:
+            if self._bootstrap_event.is_set():
+                return
+            if state:
+                self.bootstrap_from_retained(state)
+            else:
+                if not self._connected:
+                    logger.warning(
+                        "Bootstrap résolu sans connexion MQTT confirmée, valeurs par défaut utilisées"
+                    )
+                else:
+                    logger.info("Aucun état retained sur le broker, valeurs par défaut conservées")
+            self._bootstrap_event.set()
+            self._apply_control_to_hardware()
+            self._publish_availability("online")
+            self._publish_light_state()
+            self._publish_discovery()
+
+    def _apply_control_to_hardware(self) -> None:
+        """Applique l'état résolu (retained ou défaut) au clavier ou rend la main au driver."""
+        lighting = _lighting_module()
         if self.control.pilot_switch:
             if self.control.light_on:
-                lighting = _lighting_module()
                 color_to_apply = lighting.apply_brightness(
                     self.control.last_command_color,
-                    self.control.last_brightness
+                    self.control.last_brightness,
                 )
                 self.controller.set_static_color(color_to_apply)
                 logger.info("Clavier initialisé (pilot mode)", extra={"color": color_to_apply})
@@ -119,18 +157,38 @@ class MqttLightingService:
                 self.controller.set_static_color((0, 0, 0))
                 logger.info("Clavier éteint (pilot mode)")
         else:
-            logger.info("Mode auto, contrôle Logitech actif")
-        
-        logger.info(
-            "Connexion MQTT",
-            extra={"host": self.profile.mqtt.host, "port": self.profile.mqtt.port},
-        )
-        self.client.connect(
-            self.profile.mqtt.host,
-            self.profile.mqtt.port,
-            keepalive=self.profile.mqtt.keepalive,
-        )
-        self.client.loop_start()
+            # Mode auto : on rend explicitement la main au driver/G HUB, on ne suppose
+            # jamais qu'il l'a déjà (ex: arrêt précédent non propre).
+            lighting.restore_logitech_control(self.controller)
+            logger.info("Mode auto, contrôle rendu au driver Logitech")
+
+    def start(self) -> None:
+        self.controller.start()
+        try:
+            logger.info(
+                "Connexion MQTT",
+                extra={"host": self.profile.mqtt.host, "port": self.profile.mqtt.port},
+            )
+            self.client.connect(
+                self.profile.mqtt.host,
+                self.profile.mqtt.port,
+                keepalive=self.profile.mqtt.keepalive,
+            )
+            self.client.loop_start()
+
+            # Attendre l'état retained (publié par une exécution précédente) avant
+            # d'appliquer quoi que ce soit au clavier. Le message, s'il existe, arrive
+            # juste après la souscription à state_topic dans on_connect.
+            if not self._bootstrap_event.wait(timeout=self._retained_state_timeout):
+                logger.info(
+                    "Aucun état retained reçu après %.1fs, application des valeurs par défaut",
+                    self._retained_state_timeout,
+                )
+                self._finish_bootstrap(None)
+        except Exception:
+            logger.exception("Échec du démarrage MQTT, restauration de l'éclairage Logitech")
+            self.controller.shutdown()
+            raise
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -152,7 +210,10 @@ class MqttLightingService:
             logger.error("Connexion MQTT refusée", extra={"code": rc})
             return
         self._connected = True
-        
+
+        # S'abonner à state_topic en premier pour récupérer un éventuel état retained
+        # avant de traiter toute commande.
+        client.subscribe(self.profile.topics.state_topic, qos=1)
         # S'abonner aux topics de commande
         client.subscribe(self.profile.topics.command_topic, qos=1)
         client.subscribe(self.profile.topics.rgb_command_topic, qos=1)
@@ -161,15 +222,20 @@ class MqttLightingService:
         client.subscribe(self.profile.topics.warn_command_topic, qos=1)
         client.subscribe(self.profile.topics.info_command_topic, qos=1)
         client.subscribe(self.profile.topics.mode_command_topic, qos=1)
-        
+
         logger.info("Connecté au broker")
-        self._publish_availability("online")
-        self._publish_light_state()
-        # self._publish_mode_state()  # Suppression : ne publie plus le mode seul sur state_topic
-        self._publish_discovery()
+
+        if self._bootstrap_event.is_set():
+            # Reconnexion après le bootstrap initial : republier l'état courant.
+            self._publish_availability("online")
+            self._publish_light_state()
+            self._publish_discovery()
 
     def on_message(self, _client: mqtt.Client, _userdata, message) -> None:
         topic = message.topic
+        if topic == self.profile.topics.state_topic and not self._bootstrap_event.is_set():
+            self._handle_retained_bootstrap(message.payload)
+            return
         payload = message.payload.decode("utf-8", errors="ignore").strip()
         try:
             if topic == self.profile.topics.command_topic:
@@ -345,19 +411,25 @@ class MqttLightingService:
 
     def _handle_alert_button(self) -> None:
         """Déclenche une alerte visuelle Alert (rouge clignotant)."""
-        duration = self.profile.effects.override_duration_seconds
+        duration = self.profile.palettes.alert.resolve_duration_seconds(
+            self.profile.effects.override_duration_seconds
+        )
         self._handle_override_command(AlertCommand(kind="alert", duration=duration))
         logger.info("⚠️ Alerte visuelle déclenchée")
 
     def _handle_warn_button(self) -> None:
         """Déclenche une alerte visuelle Warn (orange clignotant)."""
-        duration = self.profile.effects.override_duration_seconds
+        duration = self.profile.palettes.warning.resolve_duration_seconds(
+            self.profile.effects.override_duration_seconds
+        )
         self._handle_override_command(AlertCommand(kind="warning", duration=duration))
         logger.info("⚠️ Avertissement visuel déclenché")
 
     def _handle_info_button(self) -> None:
         """Déclenche une alerte visuelle Info (palette info)."""
-        duration = self.profile.effects.override_duration_seconds
+        duration = self.profile.palettes.info.resolve_duration_seconds(
+            self.profile.effects.override_duration_seconds
+        )
         self._handle_override_command(AlertCommand(kind="info", duration=duration))
         logger.info("ℹ️ Info visuelle déclenchée")
 
@@ -426,6 +498,13 @@ class MqttLightingService:
 
     def _handle_override_command(self, command: AlertCommand) -> None:
         """Démarre un effet (alert, warning ou info) avec logs détaillés sur les frames."""
+        current = self.control.override
+        if current and current.kind == command.kind:
+            # Même effet déjà en cours (rafale de messages) : on prolonge juste le
+            # délai sans relancer l'animation, sinon le pattern est sans cesse
+            # redémarré à sa première frame et paraît figé/saturé au lieu de clignoter.
+            self._retrigger_override(command)
+            return
         self._clear_override(resume_base=False, event="replaced")
         lighting = _lighting_module()
         if command.kind == "alert":
@@ -458,6 +537,30 @@ class MqttLightingService:
         self.controller.start_pattern(frames)
         logger.info("Effet %s démarré", command.kind, extra={"duration": command.duration})
         self.control = control
+
+    def _retrigger_override(self, command: AlertCommand) -> None:
+        """Prolonge un effet déjà actif sans interrompre l'animation en cours."""
+        current = self.control.override
+        timer = current.timer_handle if current else None
+        if timer and hasattr(timer, "cancel"):
+            try:
+                timer.cancel()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Annulation du timer override impossible", exc_info=True)
+
+        new_timer = self._timer_factory(command.duration, self._complete_override, args=(command.kind,))
+        new_timer.daemon = True
+        new_timer.start()
+        self.control = self.control.start_override(
+            kind=command.kind,
+            duration_seconds=command.duration,
+            timer_handle=new_timer,
+        )
+        logger.info(
+            "Effet %s prolongé (déjà actif, animation conservée)",
+            command.kind,
+            extra={"duration": command.duration},
+        )
 
     def _complete_override(self, kind: str) -> None:
         """Appelé quand un effet se termine."""

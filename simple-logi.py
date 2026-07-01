@@ -5,26 +5,17 @@ import argparse
 import logging
 import os
 import sys
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Sequence, Tuple
 
 from lightspeed.config import ConfigError, ConfigProfile, load_config
 from lightspeed.observability import configure_logging
 
 try:
     from lightspeed.mqtt import MqttLightingService
-except ImportError as exc:  # pragma: no cover - dependency guard
-    if "paho" in str(exc).lower():
-        print("Le module 'paho-mqtt' est requis. Installez-le avec: pip install -r requirements.txt")
-        sys.exit(1)
-    raise
-
-try:
-    import paho.mqtt.client as bootstrap_mqtt
 except ImportError as exc:  # pragma: no cover - dependency guard
     if "paho" in str(exc).lower():
         print("Le module 'paho-mqtt' est requis. Installez-le avec: pip install -r requirements.txt")
@@ -129,61 +120,6 @@ def run_cli_auto(profile: ConfigProfile) -> None:
         controller.shutdown()
 
 
-def _read_retained_state(
-    profile: ConfigProfile,
-    *,
-    logger: logging.Logger,
-    timeout: float = 2.0,
-) -> Optional[dict]:
-    """Lit l'état retained du state_topic si disponible."""
-
-    event = threading.Event()
-    state: dict[str, Optional[str]] = {"value": None}
-
-    client = bootstrap_mqtt.Client(
-        client_id=f"{profile.mqtt.client_id}-bootstrap",
-        clean_session=True,
-    )
-    if profile.mqtt.username:
-        client.username_pw_set(profile.mqtt.username, profile.mqtt.password or None)
-
-    def _on_connect(mqtt_client, _userdata, _flags, rc):
-        if rc != 0:
-            logger.warning("Connexion bootstrap échouée", extra={"code": rc})
-            event.set()
-            return
-        mqtt_client.subscribe(profile.topics.state_topic, qos=1)
-
-    def _on_message(_mqtt_client, _userdata, message):
-        try:
-            state["value"] = message.payload.decode("utf-8", errors="ignore").strip()
-        except Exception:
-            pass
-        event.set()
-
-    client.on_connect = _on_connect
-    client.on_message = _on_message
-
-    try:
-        client.connect(profile.mqtt.host, profile.mqtt.port, keepalive=profile.mqtt.keepalive)
-        client.loop_start()
-        event.wait(timeout)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Lecture état retained impossible", extra={"error": str(exc)})
-        return None
-    finally:
-        client.loop_stop()
-        client.disconnect()
-
-    if state["value"]:
-        try:
-            import json
-            return json.loads(state["value"])
-        except (json.JSONDecodeError, ValueError):
-            pass
-    return None
-
-
 def run_validate_command(config_path: Path) -> int:
     try:
         profile = load_config(config_path)
@@ -254,19 +190,16 @@ def main() -> None:
             validated_at=validated_at,
         )
         
-        # Lire l'état retained pour restaurer l'état précédent
-        retained_state = _read_retained_state(profile, logger=logger)
-        if retained_state:
-            service.bootstrap_from_retained(retained_state)
-            logger.info("État restauré depuis MQTT", extra={"state": retained_state})
-        else:
-            logger.info("Aucun état retained trouvé, utilisation des valeurs par défaut")
-        
+        # L'état retained (s'il existe) est lu par le service lui-même juste après
+        # la connexion MQTT, dans MqttLightingService.start().
         try:
             service.start()
             service.loop_forever()
         except KeyboardInterrupt:
             logger.info('Arrêt demandé par l\'utilisateur.')
+        except Exception as exc:
+            logger.error("Échec du démarrage du service: %s", exc)
+            sys.exit(1)
         finally:
             service.stop()
     elif command == 'color':

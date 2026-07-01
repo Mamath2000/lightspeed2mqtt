@@ -81,6 +81,11 @@ class PaletteDefinition:
     name: str
     max_duration_ms: int
     frames: Tuple[PaletteFrame, ...]
+    duration_seconds: Optional[int] = None
+
+    def resolve_duration_seconds(self, default: int) -> int:
+        """Durée globale de l'effet : celle de la palette si définie, sinon le défaut global."""
+        return self.duration_seconds if self.duration_seconds is not None else default
 
 
 @dataclass(frozen=True)
@@ -255,7 +260,15 @@ def _parse_palette(name: str, data: Optional[Mapping[str, Any]]) -> PaletteDefin
     if not frames:
         frames = list(_default_frames(name))
 
-    return PaletteDefinition(name=name, max_duration_ms=max_duration, frames=tuple(frames))
+    duration_seconds_value = data.get("duration_seconds")
+    duration_seconds = int(duration_seconds_value) if duration_seconds_value is not None else None
+
+    return PaletteDefinition(
+        name=name,
+        max_duration_ms=max_duration,
+        frames=tuple(frames),
+        duration_seconds=duration_seconds,
+    )
 
 
 def _default_frames(name: str) -> Tuple[PaletteFrame, ...]:
@@ -405,6 +418,10 @@ def _validate_profile(profile: ConfigProfile) -> None:
                 raise ConfigError(
                     f"Une frame {palette.name} dépasse la durée max ({frame.duration_ms}>{palette.max_duration_ms})"
                 )
+        if palette.duration_seconds is not None and not 1 <= palette.duration_seconds <= 300:
+            raise ConfigError(
+                f"palettes.{palette.name}.duration_seconds doit être compris entre 1 et 300 secondes"
+            )
 
     if any(channel < 0 or channel > 255 for channel in profile.lighting.default_color):
         raise ConfigError("Les composantes RGB doivent être comprises entre 0 et 255")

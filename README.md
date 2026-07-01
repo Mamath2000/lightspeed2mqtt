@@ -83,11 +83,12 @@ lighting:
   lock_file: "lightspeed.lock" # Verrou pour éviter les accès concurrents
 
 effects:
-  override_duration_seconds: 10 # Durée Alert/Warning en secondes (entre 1 et 300)
+  override_duration_seconds: 10 # Durée globale par défaut des effets (entre 1 et 300s), utilisée si la palette ne fixe pas la sienne
 
 palettes:
   alert:
     max_duration_ms: 500 # Ne jamais dépasser 500 ms (Principe IV)
+    duration_seconds: 10 # Durée globale de l'effet alert (1-300s). Optionnel : sinon effects.override_duration_seconds
     frames:
     - color: "#FF0000"
       duration_ms: 150
@@ -97,6 +98,7 @@ palettes:
       duration_ms: 150
   warning:
     max_duration_ms: 350
+    duration_seconds: 8 # Durée globale de l'effet warning (1-300s)
     frames:
     - color: "#FF8C00"
       duration_ms: 150
@@ -104,6 +106,7 @@ palettes:
       duration_ms: 150
   info:
     max_duration_ms: 200
+    duration_seconds: 5 # Durée globale de l'effet info (1-300s)
     frames:
     - color: "#FFFFFF"
       duration_ms: 150
@@ -138,10 +141,13 @@ observability:
 | `lighting.default_color` | Couleur appliquée au démarrage | `#00FF80` |
 | `lighting.auto_restore` | Restaure le profil Logitech en mode auto | `true` |
 | `lighting.lock_file` | Verrou pour éviter les accès concurrents | `lightspeed.lock` |
-| `effects.override_duration_seconds` | Durée des overrides Alert/Warning (1-300s) | `10` |
-| `palettes.alert.max_duration_ms` | Durée max (Principe IV) | `500` |
-| `palettes.warning.max_duration_ms` | Durée max warning | `350` |
-| `palettes.info.max_duration_ms` | Durée max info | `200` |
+| `effects.override_duration_seconds` | Durée globale par défaut des effets, si la palette n'en fixe pas (1-300s) | `10` |
+| `palettes.alert.max_duration_ms` | Durée max d'une frame (Principe IV) | `500` |
+| `palettes.alert.duration_seconds` | Durée globale de l'effet alert, optionnel (1-300s) | `10` |
+| `palettes.warning.max_duration_ms` | Durée max d'une frame warning | `350` |
+| `palettes.warning.duration_seconds` | Durée globale de l'effet warning, optionnel (1-300s) | `8` |
+| `palettes.info.max_duration_ms` | Durée max d'une frame info | `200` |
+| `palettes.info.duration_seconds` | Durée globale de l'effet info, optionnel (1-300s) | `5` |
 | `logitech.dll_path` | Chemin personnalisé vers LogitechLed.dll | `lib\\LogitechLed.dll` |
 | `observability.log_level` | Niveau de logs | `INFO` |
 <!-- config-table:end -->
