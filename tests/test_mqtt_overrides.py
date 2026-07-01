@@ -88,6 +88,7 @@ def fake_lighting(monkeypatch):
     module = types.SimpleNamespace(
         apply_brightness=lambda color, brightness: color,
         restore_logitech_control=lambda controller: controller.released_calls.append("restore"),
+        restore_logitech_visual=lambda controller: controller.released_calls.append("restore_visual"),
         reapply_cached_color=lambda controller, color, brightness: controller.static_colors.append(color),
         alert_frames=lambda profile: (((255, 0, 0), 0.15),),
         warning_frames=lambda profile: (((255, 140, 0), 0.15),),
@@ -150,6 +151,32 @@ def test_palette_specific_duration_is_used(tmp_path, fake_lighting):
 
     service._handle_warn_button()
     assert service.control.override.duration_seconds == 10  # pas de valeur dédiée -> défaut global
+
+
+def test_override_completion_in_auto_mode_keeps_sdk_session_open(tmp_path, fake_lighting):
+    """En mode auto, la fin d'un effet doit rendre l'affichage à Logitech SANS fermer la
+    session SDK (restore_logitech_visual), pour que l'alerte suivante démarre
+    immédiatement au lieu de repayer ~2s de réinitialisation SDK à chaque fois."""
+    service, controller = build_service(tmp_path, fake_lighting)
+    service.control = service.control.set_pilot_switch(False)
+
+    service._handle_alert_button()
+    service._complete_override("alert")
+
+    assert controller.released_calls == ["restore_visual"]
+    assert service.control.override is None
+
+
+def test_explicit_mode_switch_to_auto_fully_releases_sdk(tmp_path, fake_lighting):
+    """Un changement de mode explicite (mode/set -> auto) reste un `release()` complet :
+    c'est une action délibérée et peu fréquente, contrairement à la fin d'un effet."""
+    service, controller = build_service(tmp_path, fake_lighting)
+    assert service.control.pilot_switch is True
+
+    service._handle_mode_command("auto")
+
+    assert controller.released_calls == ["restore"]
+    assert service.control.pilot_switch is False
 
 
 def test_override_cleared_even_if_hardware_resume_fails(tmp_path, fake_lighting):

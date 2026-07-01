@@ -145,6 +145,9 @@ class MqttLightingService:
             self._publish_availability("online")
             self._publish_light_state()
             self._publish_discovery()
+        # Ne plus recevoir l'écho de nos propres publications retained sur state_topic
+        # une fois l'état initial connu (cf. commentaire dans on_connect).
+        self.client.unsubscribe(self.profile.topics.state_topic)
 
     def _apply_control_to_hardware(self) -> None:
         """Applique l'état résolu (retained ou défaut) au clavier ou rend la main au driver."""
@@ -161,10 +164,13 @@ class MqttLightingService:
                 self.controller.set_static_color((0, 0, 0))
                 logger.info("Clavier éteint (pilot mode)")
         else:
-            # Mode auto : on rend explicitement la main au driver/G HUB, on ne suppose
-            # jamais qu'il l'a déjà (ex: arrêt précédent non propre).
-            lighting.restore_logitech_control(self.controller)
-            logger.info("Mode auto, contrôle rendu au driver Logitech")
+            # Mode auto : on rend explicitement l'affichage au driver/G HUB, on ne
+            # suppose jamais qu'il l'a déjà (ex: arrêt précédent non propre). On garde
+            # la session SDK ouverte (restore_logitech_visual, pas restore_logitech_control)
+            # pour que la toute première alerte après le démarrage soit immédiate au lieu
+            # d'attendre la réinitialisation SDK (~2s).
+            lighting.restore_logitech_visual(self.controller)
+            logger.info("Mode auto, affichage rendu au driver Logitech")
 
     def start(self) -> None:
         self.controller.start()
@@ -215,9 +221,13 @@ class MqttLightingService:
             return
         self._connected = True
 
-        # S'abonner à state_topic en premier pour récupérer un éventuel état retained
-        # avant de traiter toute commande.
-        client.subscribe(self.profile.topics.state_topic, qos=1)
+        if not self._bootstrap_event.is_set():
+            # S'abonner à state_topic uniquement tant que l'état retained n'a pas encore
+            # été lu : une fois le bootstrap résolu, rester abonné ferait recevoir en
+            # écho chacune de nos propres publications retained (nous sommes le seul
+            # émetteur de ce topic), ce qui ajoute un aller-retour de traitement inutile
+            # sur le thread réseau à chaque commande.
+            client.subscribe(self.profile.topics.state_topic, qos=1)
         # S'abonner aux topics de commande
         client.subscribe(self.profile.topics.command_topic, qos=1)
         client.subscribe(self.profile.topics.rgb_command_topic, qos=1)
@@ -622,9 +632,12 @@ class MqttLightingService:
                     else:
                         self.controller.set_static_color((0, 0, 0))
                 else:
-                    # Mode auto : rendre la main à Logitech
+                    # Mode auto : rendre l'affichage à Logitech sans fermer la session SDK
+                    # (restore_logitech_visual) : les effets (alert/warning/info) peuvent
+                    # se déclencher souvent en mode auto, et fermer/rouvrir la session à
+                    # chaque fois ajoutait ~2s de latence avant le début de chaque alerte.
                     lighting = _lighting_module()
-                    lighting.restore_logitech_control(self.controller)
+                    lighting.restore_logitech_visual(self.controller)
             except Exception:  # pragma: no cover - defensive
                 logger.exception("Échec de la reprise d'état après l'effet %s", override.kind)
 
