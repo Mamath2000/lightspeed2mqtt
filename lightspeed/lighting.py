@@ -148,6 +148,10 @@ def parse_color_string(value: str) -> RGB:
 class LightingController:
     def __init__(self, dll_path: Optional[str] = None, *, lock_file: Optional[str] = None) -> None:
         self.lock = threading.Lock()
+        # Verrou distinct pour la gestion du thread d'animation (start_pattern/stop_pattern).
+        # Ne jamais l'acquérir en même temps que `self.lock` côté worker : le worker ne
+        # prend que `self.lock`, donc aucun risque de cycle d'attente entre les deux.
+        self._pattern_lock = threading.Lock()
         self.pattern_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
         self.initialized = False
@@ -286,28 +290,39 @@ class LightingController:
         if not frames:
             raise ValueError("Aucun frame fourni pour le pattern")
         self.start()
-        self.stop_pattern()
-        self._reattach_control()
-        self.released = False
-        self.stop_event = threading.Event()
+        with self._pattern_lock:
+            self._stop_pattern_locked()
+            self._reattach_control()
+            self.released = False
+            # Événement local capturé par la closure du worker : même si un appel
+            # concurrent réassigne self.stop_event plus tard, CE thread continuera à
+            # observer le sien, qui a été signalé au bon moment par _stop_pattern_locked.
+            stop_event = threading.Event()
+            self.stop_event = stop_event
 
-        def worker() -> None:
-            palette = list(frames)
-            if not palette:
-                return
-            while not self.stop_event.is_set():
-                for color, duration in palette:
-                    if self.stop_event.is_set():
-                        break
-                    self._set_color_now(color)
-                    wait_time = max(duration, 0.05)
-                    if self.stop_event.wait(wait_time):
-                        break
+            def worker() -> None:
+                palette = list(frames)
+                if not palette:
+                    return
+                while not stop_event.is_set():
+                    for color, duration in palette:
+                        if stop_event.is_set():
+                            break
+                        self._set_color_now(color)
+                        wait_time = max(duration, 0.05)
+                        if stop_event.wait(wait_time):
+                            break
 
-        self.pattern_thread = threading.Thread(target=worker, daemon=True)
-        self.pattern_thread.start()
+            thread = threading.Thread(target=worker, daemon=True)
+            self.pattern_thread = thread
+            thread.start()
 
     def stop_pattern(self) -> None:
+        with self._pattern_lock:
+            self._stop_pattern_locked()
+
+    def _stop_pattern_locked(self) -> None:
+        """Doit être appelé avec `self._pattern_lock` déjà acquis."""
         if self.pattern_thread and self.pattern_thread.is_alive():
             self.stop_event.set()
             self.pattern_thread.join()

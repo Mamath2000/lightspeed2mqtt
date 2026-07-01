@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 import types
 from datetime import datetime, timezone
 from unittest import mock
@@ -86,6 +88,7 @@ def fake_lighting(monkeypatch):
     module = types.SimpleNamespace(
         apply_brightness=lambda color, brightness: color,
         restore_logitech_control=lambda controller: controller.released_calls.append("restore"),
+        reapply_cached_color=lambda controller, color, brightness: controller.static_colors.append(color),
         alert_frames=lambda profile: (((255, 0, 0), 0.15),),
         warning_frames=lambda profile: (((255, 140, 0), 0.15),),
         info_frames=lambda profile: (((255, 255, 255), 0.15),),
@@ -147,3 +150,51 @@ def test_palette_specific_duration_is_used(tmp_path, fake_lighting):
 
     service._handle_warn_button()
     assert service.control.override.duration_seconds == 10  # pas de valeur dédiée -> défaut global
+
+
+def test_override_cleared_even_if_hardware_resume_fails(tmp_path, fake_lighting):
+    """Si la reprise matérielle après un effet lève une exception, l'état interne ne
+    doit pas rester bloqué en "override actif" (sinon l'effet suivant du même type est
+    pris pour une simple prolongation d'un effet déjà arrêté)."""
+    fake_lighting.reapply_cached_color = mock.Mock(side_effect=RuntimeError("SDK KO"))
+    service, controller = build_service(tmp_path, fake_lighting)
+
+    service._handle_alert_button()
+    assert service.control.override is not None
+
+    service._complete_override("alert")
+
+    assert service.control.override is None
+    assert controller.pattern_stops == 1
+
+
+def test_alert_spam_with_real_timers_does_not_deadlock(tmp_path, fake_lighting):
+    """Rafale d'alertes avec de vrais threading.Timer à expiration très courte : simule
+    la course entre le thread réseau MQTT (nouveaux messages) et le thread du Timer qui
+    expire un effet (_complete_override), pour vérifier que _override_lock empêche tout
+    blocage (le bug rapporté nécessitait un redémarrage du service NSSM).
+    """
+    service, controller = build_service(tmp_path, fake_lighting)
+    service._timer_factory = threading.Timer  # timers réels, pas de FakeTimer
+
+    errors: list[Exception] = []
+
+    def spam() -> None:
+        try:
+            for _ in range(40):
+                service._handle_override_command(mqtt_module.AlertCommand(kind="alert", duration=0.01))
+                time.sleep(0.001)
+        except Exception as exc:  # pragma: no cover - défensif
+            errors.append(exc)
+
+    threads = [threading.Thread(target=spam) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert all(not t.is_alive() for t in threads), "un thread est resté bloqué (deadlock)"
+    assert not errors, f"erreurs inattendues pendant la rafale: {errors}"
+
+    # Laisser les derniers timers réels expirer avant la fin du test.
+    time.sleep(0.05)

@@ -66,6 +66,10 @@ class MqttLightingService:
         self._connected = False
         self.client = mqtt.Client(client_id=profile.mqtt.client_id, clean_session=True)
         self._timer_factory = threading.Timer
+        # Sérialise le démarrage/prolongation/expiration des effets : un effet peut
+        # expirer sur son propre thread Timer pendant qu'un nouveau message arrive sur
+        # le thread réseau MQTT.
+        self._override_lock = threading.Lock()
         # Bootstrap de l'état retained : résolu une seule fois, soit par réception du
         # message retained sur state_topic, soit par expiration du délai d'attente.
         self._bootstrap_event = threading.Event()
@@ -497,46 +501,53 @@ class MqttLightingService:
             self.client.publish(message.topic, payload=message.payload, qos=1, retain=message.retain)
 
     def _handle_override_command(self, command: AlertCommand) -> None:
-        """Démarre un effet (alert, warning ou info) avec logs détaillés sur les frames."""
-        current = self.control.override
-        if current and current.kind == command.kind:
-            # Même effet déjà en cours (rafale de messages) : on prolonge juste le
-            # délai sans relancer l'animation, sinon le pattern est sans cesse
-            # redémarré à sa première frame et paraît figé/saturé au lieu de clignoter.
-            self._retrigger_override(command)
-            return
-        self._clear_override(resume_base=False, event="replaced")
-        lighting = _lighting_module()
-        if command.kind == "alert":
-            frames = lighting.alert_frames(self.profile)
-        elif command.kind == "warning":
-            frames = lighting.warning_frames(self.profile)
-        elif command.kind == "info":
-            frames = lighting.info_frames(self.profile)
-        else:
-            logger.warning(f"Type d'effet inconnu: {command.kind}")
-            return
-        # Log détaillé sur les frames utilisées
-        logger.debug(
-            "Palette utilisée pour %s: %s",
-            command.kind,
-            [
-                {"color": f"#{r:02X}{g:02X}{b:02X}", "duration": d}
-                for (r, g, b), d in frames
-            ]
-        )
-        timer = self._timer_factory(command.duration, self._complete_override, args=(command.kind,))
-        timer.daemon = True
-        timer.start()
-        control = self.control.start_override(
-            kind=command.kind,
-            duration_seconds=command.duration,
-            timer_handle=timer,
-        )
-        logger.debug("Lancement du pattern sur le contrôleur: %r", frames)
-        self.controller.start_pattern(frames)
-        logger.info("Effet %s démarré", command.kind, extra={"duration": command.duration})
-        self.control = control
+        """Démarre un effet (alert, warning ou info) avec logs détaillés sur les frames.
+
+        Protégé par `_override_lock` : un effet peut aussi être terminé par son propre
+        timer (`_complete_override`, sur un thread séparé) au même moment où un nouveau
+        message arrive sur le thread réseau MQTT. Sans verrou, ces deux threads peuvent
+        se marcher dessus sur `self.control` et sur le thread d'animation du contrôleur.
+        """
+        with self._override_lock:
+            current = self.control.override
+            if current and current.kind == command.kind:
+                # Même effet déjà en cours (rafale de messages) : on prolonge juste le
+                # délai sans relancer l'animation, sinon le pattern est sans cesse
+                # redémarré à sa première frame et paraît figé/saturé au lieu de clignoter.
+                self._retrigger_override(command)
+                return
+            self._clear_override(resume_base=False, event="replaced")
+            lighting = _lighting_module()
+            if command.kind == "alert":
+                frames = lighting.alert_frames(self.profile)
+            elif command.kind == "warning":
+                frames = lighting.warning_frames(self.profile)
+            elif command.kind == "info":
+                frames = lighting.info_frames(self.profile)
+            else:
+                logger.warning(f"Type d'effet inconnu: {command.kind}")
+                return
+            # Log détaillé sur les frames utilisées
+            logger.debug(
+                "Palette utilisée pour %s: %s",
+                command.kind,
+                [
+                    {"color": f"#{r:02X}{g:02X}{b:02X}", "duration": d}
+                    for (r, g, b), d in frames
+                ]
+            )
+            timer = self._timer_factory(command.duration, self._complete_override, args=(command.kind,))
+            timer.daemon = True
+            timer.start()
+            control = self.control.start_override(
+                kind=command.kind,
+                duration_seconds=command.duration,
+                timer_handle=timer,
+            )
+            logger.debug("Lancement du pattern sur le contrôleur: %r", frames)
+            self.controller.start_pattern(frames)
+            logger.info("Effet %s démarré", command.kind, extra={"duration": command.duration})
+            self.control = control
 
     def _retrigger_override(self, command: AlertCommand) -> None:
         """Prolonge un effet déjà actif sans interrompre l'animation en cours."""
@@ -563,8 +574,14 @@ class MqttLightingService:
         )
 
     def _complete_override(self, kind: str) -> None:
-        """Appelé quand un effet se termine."""
-        cleared = self._clear_override(resume_base=True, event="complete")
+        """Appelé (sur le thread du Timer) quand la durée d'un effet expire."""
+        with self._override_lock:
+            current = self.control.override
+            if not current or current.kind != kind:
+                # Un nouvel effet a déjà remplacé celui-ci entre-temps (rafale) :
+                # ce timer est obsolète, on ne touche à rien.
+                return
+            cleared = self._clear_override(resume_base=True, event="complete")
         if cleared:
             logger.info("Effet %s terminé", kind)
             self._publish_light_state()
@@ -584,25 +601,32 @@ class MqttLightingService:
         
         self.controller.stop_pattern()
         control = self.control.clear_override()
-        
+        # Fixer l'état à jour tout de suite : si la réapplication matérielle ci-dessous
+        # échoue, l'override ne doit pas rester "actif" alors que l'animation est déjà
+        # arrêtée (sinon un nouvel effet du même type serait pris pour une simple
+        # prolongation d'un effet fantôme).
+        self.control = control
+
         # Réappliquer l'état selon le mode
         if resume_base:
-            if control.pilot_switch:
-                # Mode pilot : appliquer la couleur du light
-                if control.light_on:
-                    lighting = _lighting_module()
-                    lighting.reapply_cached_color(
-                        self.controller,
-                        control.last_command_color,
-                        control.last_brightness,
-                    )
+            try:
+                if control.pilot_switch:
+                    # Mode pilot : appliquer la couleur du light
+                    if control.light_on:
+                        lighting = _lighting_module()
+                        lighting.reapply_cached_color(
+                            self.controller,
+                            control.last_command_color,
+                            control.last_brightness,
+                        )
+                    else:
+                        self.controller.set_static_color((0, 0, 0))
                 else:
-                    self.controller.set_static_color((0, 0, 0))
-            else:
-                # Mode auto : rendre la main à Logitech
-                lighting = _lighting_module()
-                lighting.restore_logitech_control(self.controller)
-        
-        self.control = control
+                    # Mode auto : rendre la main à Logitech
+                    lighting = _lighting_module()
+                    lighting.restore_logitech_control(self.controller)
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("Échec de la reprise d'état après l'effet %s", override.kind)
+
         logger.info("Effet %s arrêté (%s)", override.kind, event)
         return True
