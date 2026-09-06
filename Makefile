@@ -1,7 +1,7 @@
 test:
 # Makefile pour lightspeed2mqtt
 
-.PHONY: help run test venv install add_service remove_service stop_service edit_service
+.PHONY: help run test venv install add_service remove_service stop_service restart_service edit_service
 
 
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "  make add_service   : installer le service Windows via nssm"
 	@echo "  make remove_service: désinstaller le service Windows via nssm"
 	@echo "  make stop_service  : arrêter le service Windows via nssm"
+	@echo "  make restart_service: redémarrer le service Windows via nssm"
 	@echo "  make edit_service  : éditer le service Windows via nssm (GUI)"
 	@echo "  make help          : afficher cette aide"
 
@@ -41,6 +42,11 @@ stop_service:
 	@echo Arrêt du service Windows via NSSM...
 	@powershell -NoProfile -Command "& '$(NSSM_PATH)' stop $(SERVICE_NAME)"
 	@echo Service arrêté.
+
+restart_service:
+	@echo Redémarrage du service Windows via NSSM...
+	@powershell -NoProfile -Command "& '$(NSSM_PATH)' restart $(SERVICE_NAME)"
+	@echo Service redémarré.
 
 edit_service:
 	@echo Edition du service Windows via NSSM (GUI)...

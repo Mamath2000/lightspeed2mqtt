@@ -277,8 +277,30 @@ class LightingController:
 
     def _set_color_now(self, rgb: RGB) -> None:
         r, g, b = (clamp_channel(channel) for channel in rgb)
+        pct = (to_pct(r), to_pct(g), to_pct(b))
         with self.lock:
-            logi_led.logi_led_set_lighting(to_pct(r), to_pct(g), to_pct(b))
+            if logi_led.logi_led_set_lighting(*pct):
+                return
+            # Échec silencieux typique après une sortie de veille (session SDK/USB
+            # invalidée alors que `self.initialized` reste vrai) : on force une
+            # réinitialisation puis on rejoue la commande une seule fois.
+            logger.warning("LogiLedSetLighting a échoué, réinitialisation de la session SDK")
+            if self._reinit_session_locked() and logi_led.logi_led_set_lighting(*pct):
+                return
+            logger.error("LogiLedSetLighting a échoué après réinitialisation de la session SDK")
+
+    def _reinit_session_locked(self) -> bool:
+        """Force la réinitialisation de la session SDK. `self.lock` doit déjà être tenu."""
+        try:
+            logi_led.logi_led_shutdown()
+            if not logi_led.logi_led_init():
+                logger.error("Réinitialisation de la session SDK Logitech échouée (LogiLedInit)")
+                return False
+            logi_led.logi_led_save_current_lighting()
+            return True
+        except Exception:
+            logger.exception("Exception pendant la réinitialisation de la session SDK Logitech")
+            return False
 
     def set_static_color(self, rgb: RGB) -> None:
         self.start()

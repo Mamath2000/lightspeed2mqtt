@@ -78,6 +78,7 @@ class MqttLightingService:
         if profile.mqtt.username:
             self.client.username_pw_set(profile.mqtt.username, profile.mqtt.password or None)
         self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
         self.client.on_message = self.on_message
         configure_last_will(self.client, self.profile)
 
@@ -244,6 +245,16 @@ class MqttLightingService:
             self._publish_availability("online")
             self._publish_light_state()
             self._publish_discovery()
+
+    def on_disconnect(self, _client: mqtt.Client, _userdata, rc: int) -> None:
+        self._connected = False
+        if rc == 0:
+            logger.info("Déconnexion MQTT propre")
+        else:
+            logger.warning(
+                "Déconnexion MQTT inattendue, reconnexion automatique en cours",
+                extra={"code": rc},
+            )
 
     def on_message(self, _client: mqtt.Client, _userdata, message) -> None:
         topic = message.topic
@@ -453,14 +464,14 @@ class MqttLightingService:
         
         if mode not in {"pilot", "auto"}:
             logger.warning("Commande mode invalide", extra={"payload": payload})
-            self._publish_mode_state()
+            self._publish_light_state()
             return
-        
+
         desired_pilot = (mode == "pilot")
-        
+
         if desired_pilot == self.control.pilot_switch:
             # Pas de changement
-            self._publish_mode_state()
+            self._publish_light_state()
             return
         
         if desired_pilot:
