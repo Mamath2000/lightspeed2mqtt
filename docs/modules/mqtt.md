@@ -38,6 +38,11 @@ Notes opérationnelles :
 - Le LWT est configuré via `lightspeed.observability.configure_last_will()` (payload `offline` en retained).
 - Les messages d'état publiés sont JSON compressés (séparateurs `(',', ':')`) pour réduire la taille.
 
+Fin d'un override (alert/warning/info) — `_clear_override()` :
+
+- Mode pilot : réapplique la couleur/luminosité mise en cache (`reapply_cached_color`), sans toucher à la session SDK.
+- Mode auto : fait toujours un `release()` complet (`restore_logitech_control`, donc `LogiLedShutdown`). C'est le seul moyen de rendre réellement la main à Logitech (voir [Lighting & SDK](./lighting)) ; le coût de réinitialisation au prochain effet est négligeable en pratique, y compris pour des alertes rapprochées.
+
 Voir aussi :
 - [Home Assistant discovery](./ha-contracts)
 - [Observability / LWT](./observability)

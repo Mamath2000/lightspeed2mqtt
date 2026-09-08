@@ -37,5 +37,12 @@ Sécurité :
 
 - Tous les appels SDK sont encapsulés et protégés par locks pour éviter les conditions de concurrence.
 
+Save/Restore et contrôle Logitech (limite du SDK) :
+
+- `LogiLedSaveCurrentLighting()` / `LogiLedRestoreLighting()` ne font que rejouer un snapshot interne au SDK ; ils ne rendent jamais la main au driver/G HUB. La session SDK reste propriétaire exclusive de l'éclairage tant qu'elle est ouverte.
+- `LogiLedInit()` coupe systématiquement tout effet natif Logitech en cours (comportement documenté du SDK) — il n'y a donc pas de moyen de "jeter un œil" à l'effet natif sans l'interrompre.
+- Seul `LogiLedShutdown()` (via `release()`) rend réellement la main à Logitech Options+/G HUB.
+- `start_pattern()` appelle `LogiLedSaveCurrentLighting()` juste avant de lancer l'effet (recommandation du SDK), pour disposer d'un état de repli à jour si un appelant veut réappliquer la couleur précédente sans repasser par `release()`.
+
 Voir aussi :
 - `config.yaml` pour `lighting.lock_file` et `lighting.default_color`.
