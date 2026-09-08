@@ -165,12 +165,10 @@ class MqttLightingService:
                 self.controller.set_static_color((0, 0, 0))
                 logger.info("Clavier éteint (pilot mode)")
         else:
-            # Mode auto : on rend explicitement l'affichage au driver/G HUB, on ne
-            # suppose jamais qu'il l'a déjà (ex: arrêt précédent non propre). On garde
-            # la session SDK ouverte (restore_logitech_visual, pas restore_logitech_control)
-            # pour que la toute première alerte après le démarrage soit immédiate au lieu
-            # d'attendre la réinitialisation SDK (~2s).
-            lighting.restore_logitech_visual(self.controller)
+            # Mode auto : on rend explicitement la main au driver/G HUB via un release()
+            # complet (LogiLedShutdown), on ne suppose jamais qu'il l'a déjà (ex: arrêt
+            # précédent non propre). No-op si le contrôleur n'a jamais été initialisé.
+            lighting.restore_logitech_control(self.controller)
             logger.info("Mode auto, affichage rendu au driver Logitech")
 
     def start(self) -> None:
@@ -643,12 +641,14 @@ class MqttLightingService:
                     else:
                         self.controller.set_static_color((0, 0, 0))
                 else:
-                    # Mode auto : rendre l'affichage à Logitech sans fermer la session SDK
-                    # (restore_logitech_visual) : les effets (alert/warning/info) peuvent
-                    # se déclencher souvent en mode auto, et fermer/rouvrir la session à
-                    # chaque fois ajoutait ~2s de latence avant le début de chaque alerte.
+                    # Mode auto : release() complet (LogiLedShutdown), seul moyen de
+                    # vraiment rendre la main à Logitech. LogiLedInit() coupe tout effet
+                    # natif en cours, donc tant que la session SDK reste ouverte (via
+                    # restore_logitech_visual/LogiLedRestoreLighting) Logitech ne reprend
+                    # jamais réellement la main : au mieux on rejoue un snapshot figé.
+                    # Coût accepté : ~2s de réinitialisation SDK au prochain effet.
                     lighting = _lighting_module()
-                    lighting.restore_logitech_visual(self.controller)
+                    lighting.restore_logitech_control(self.controller)
             except Exception:  # pragma: no cover - defensive
                 logger.exception("Échec de la reprise d'état après l'effet %s", override.kind)
 

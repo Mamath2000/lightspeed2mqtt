@@ -316,6 +316,12 @@ class LightingController:
             self._stop_pattern_locked()
             self._reattach_control()
             self.released = False
+            # Snapshot juste avant l'effet temporaire (recommandation du SDK Logitech :
+            # sans cet appel, `restore_lighting()` en fin d'effet rejoue le snapshot pris
+            # au tout premier `start()` du service - potentiellement obsolète/noir -
+            # plutôt que l'état qui précédait réellement cette alerte.
+            with self.lock:
+                logi_led.logi_led_save_current_lighting()
             # Événement local capturé par la closure du worker : même si un appel
             # concurrent réassigne self.stop_event plus tard, CE thread continuera à
             # observer le sien, qui a été signalé au bon moment par _stop_pattern_locked.
@@ -362,30 +368,10 @@ class LightingController:
         self.released = True
         self.initialized = False
 
-    def restore_visual_only(self) -> None:
-        """Rend l'affichage à Logitech sans fermer la session SDK.
-
-        Contrairement à `release()`, la session SDK reste initialisée : le prochain
-        `start_pattern`/`set_static_color` n'aura pas à repayer le coût (~2s) de
-        `LogiLedInit`. À utiliser pour les retours en mode auto fréquents (fin d'un
-        effet alert/warning/info) ; `release()` reste réservé à un vrai changement de
-        mode explicite (`mode/set` -> auto) ou à l'arrêt du service.
-        """
-        if not self.initialized:
-            return
-        self.stop_pattern()
-        with self.lock:
-            logi_led.logi_led_restore_lighting()
-
 
 def restore_logitech_control(controller: LightingController) -> None:
     """Return keyboard control to Logitech Options+/G HUB via the controller."""
     controller.release()
-
-
-def restore_logitech_visual(controller: LightingController) -> None:
-    """Rend l'affichage à Logitech sans fermer la session SDK (transition rapide)."""
-    controller.restore_visual_only()
 
 
 def reapply_cached_color(controller: LightingController, base_color: RGB, brightness: int) -> None:
